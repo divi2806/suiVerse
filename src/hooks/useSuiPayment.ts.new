@@ -1,0 +1,146 @@
+import { useSuiClient, useCurrentAccount, useSuiClientQuery } from '@mysten/dapp-kit';
+import { useState } from 'react';
+import { TransactionBlock } from '@mysten/sui/transactions';
+import { bcs } from '@mysten/sui/bcs';
+import { toast } from '@/components/ui/use-toast';
+
+// The receiver wallet address for mystery box payments
+const PAYMENT_RECEIVER_ADDRESS = '0x1a0653c5c65355eef0069f431f18ef8f829125e1ed20db0bfd054b4d338553ef';
+
+// Define payment amounts in Sui - these match the costs of different box types
+export const PAYMENT_AMOUNTS = {
+  common: 0.05, // 0.05 SUI
+  rare: 0.15,   // 0.15 SUI
+  legendary: 0.3 // 0.3 SUI
+};
+
+export function useSuiPayment() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [txDigest, setTxDigest] = useState<string | null>(null);
+  const [isPaid, setIsPaid] = useState(false);
+  
+  const suiClient = useSuiClient();
+  const currentAccount = useCurrentAccount();
+
+  // Get account balance
+  const { data: balance } = useSuiClientQuery(
+    'getBalance',
+    {
+      owner: currentAccount?.address || '',
+    },
+    {
+      enabled: !!currentAccount,
+    }
+  );
+
+  // Helper to convert SUI to MIST (the smallest unit)
+  const suiToMist = (amount: number): bigint => {
+    return BigInt(Math.floor(amount * 1_000_000_000));
+  };
+
+  // Check if user has enough balance
+  const hasEnoughBalance = (amount: number): boolean => {
+    if (!balance) return false;
+    const requiredMist = suiToMist(amount);
+    return BigInt(balance.totalBalance) >= requiredMist;
+  };
+
+  // Pay for a mystery box
+  const payForMysteryBox = async (boxType: 'common' | 'rare' | 'legendary'): Promise<{
+    success: boolean;
+    txDigest?: string;
+  }> => {
+    if (!currentAccount) {
+      setError('No wallet connected');
+      return { success: false };
+    }
+
+    const amount = PAYMENT_AMOUNTS[boxType];
+    
+    if (!hasEnoughBalance(amount)) {
+      setError(`Insufficient balance. You need at least ${amount} SUI.`);
+      toast({
+        title: "Insufficient Balance",
+        description: `You need at least ${amount} SUI to purchase this box.`,
+        variant: "destructive"
+      });
+      return { success: false };
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Create a transaction block
+      const tx = new TransactionBlock();
+      
+      // Convert amount to MIST (SUI * 10^9)
+      const amountMist = suiToMist(amount);
+      
+      // Add a transfer operation to the transaction - use proper serialization for parameters
+      tx.transferObjects(
+        [tx.splitCoins(tx.gas, [tx.pure(Number(amountMist))])], 
+        tx.pure(PAYMENT_RECEIVER_ADDRESS)
+      );
+
+      // Execute the transaction block
+      const result = await suiClient.signAndExecuteTransactionBlock({
+        transactionBlock: tx,
+        options: {
+          showEffects: true,
+          showEvents: true,
+        },
+      });
+
+      // Check if transaction was successful
+      if (result && result.effects?.status?.status === "success") {
+        setTxDigest(result.digest);
+        setIsPaid(true);
+        
+        toast({
+          title: "Payment Successful",
+          description: `You've successfully paid ${amount} SUI for the ${boxType} box!`,
+        });
+        
+        return { 
+          success: true,
+          txDigest: result.digest
+        };
+      } else {
+        setError('Transaction failed');
+        toast({
+          title: "Transaction Failed",
+          description: "The payment could not be processed. Please try again.",
+          variant: "destructive"
+        });
+        return { success: false };
+      }
+    } catch (error) {
+      console.error('Payment error:', error);
+      setError('Error processing payment');
+      toast({
+        title: "Payment Error",
+        description: "Error processing your payment. Please try again.",
+        variant: "destructive"
+      });
+      return { success: false };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return {
+    payForMysteryBox,
+    isLoading,
+    error,
+    txDigest,
+    isPaid,
+    hasEnoughBalance,
+    resetPaymentState: () => {
+      setIsPaid(false);
+      setTxDigest(null);
+      setError(null);
+    }
+  };
+} 

@@ -1,0 +1,65 @@
+.celebration-animation {
+  background: linear-gradient(45deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1), rgba(249, 115, 22, 0.1));
+  background-size: 600% 600%;
+  animation: gradientShift 8s ease infinite;
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.level-up-stars {
+  background-image: 
+    radial-gradient(circle, rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.15) 2px, transparent 2px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.1) 3px, transparent 3px);
+  background-size: 
+    50px 50px,
+    100px 100px,
+    150px 150px;
+  animation: twinkle 5s ease infinite;
+}
+
+@keyframes twinkle {
+  0%, 100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Onboarding animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.floating-animation {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Toast styles */
+.sui-reward-toast {
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border: 1px solid #6366f1;
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.3);
+}
+
+.mystery-box-toast {
+  background: linear-gradient(135deg, #4b0082, #191970);
+  border: 1px solid #d946ef;
+  box-shadow: 0 0 15px rgba(217, 70, 239, 0.3);
+} 

@@ -1,0 +1,58 @@
+.space-grid {
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.option-card {
+  transition: all 0.2s ease;
+}
+
+.option-card:hover:not(.selected) {
+  transform: translateX(5px);
+  box-shadow: 0 0 10px rgba(121, 40, 202, 0.3);
+}
+
+.option-marker {
+  transition: all 0.3s ease;
+}
+
+.explanation-box {
+  border-left: 4px solid var(--primary);
+}
+
+.loading-animation {
+  display: inline-block;
+  width: 50px;
+  height: 50px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Success/failure animations */
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.pulse-success {
+  animation: pulse 0.5s ease-in-out;
+}
+
+.pulse-error {
+  animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+} 

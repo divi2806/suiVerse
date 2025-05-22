@@ -1,0 +1,13 @@
+// Export all pages from this index file
+export { default as HomePage } from './HomePage';
+export { default as Learning } from './Learning';
+export { default as Games } from './Games';
+export { default as Duels } from './Duels';
+export { default as Leaderboard } from './Leaderboard';
+export { default as ModulePage } from './ModulePage';
+export { default as Rewards } from './Rewards';
+export { default as Profile } from './Profile';
+export { default as Inventory } from './Inventory';
+export { default as Settings } from './Settings';
+export { default as Blazo } from './Blazo';
+export { default as NotFound } from './NotFound'; 

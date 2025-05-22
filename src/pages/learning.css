@@ -1,0 +1,101 @@
+/* Learning page specific styles */
+
+.galaxy-card {
+  background-color: hsl(var(--card));
+  border-radius: 0.75rem;
+  border: 1px solid rgba(76, 0, 255, 0.1);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.text-gradient {
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-image: linear-gradient(to right, hsl(var(--primary)), hsl(var(--accent)));
+}
+
+.progress-bar {
+  height: 0.5rem;
+  width: 100%;
+  background-color: hsl(var(--background));
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background-image: linear-gradient(to right, hsl(var(--primary)), hsl(var(--accent)));
+  border-radius: 9999px;
+  transition: width 0.5s ease;
+}
+
+.neon-button {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  box-shadow: 0 0 15px rgba(76, 0, 255, 0.5);
+  transition: all 0.3s ease;
+}
+
+.neon-button:hover {
+  background-color: hsl(var(--accent));
+  box-shadow: 0 0 20px rgba(76, 0, 255, 0.7);
+}
+
+.loading-spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid hsl(var(--accent));
+  border-top: 2px solid transparent;
+  border-radius: 9999px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.star-bg {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(white 1px, transparent 1px);
+  background-size: 30px 30px;
+  opacity: 0.05;
+}
+
+.galaxy-locked {
+  background-color: hsl(var(--background));
+  border: 1px solid hsla(var(--muted-foreground), 0.3);
+}
+
+.galaxy-glow {
+  background-color: hsl(var(--background) / 0.3);
+  border: 1px solid hsla(var(--primary), 0.5);
+  box-shadow: 0 0 20px rgba(76, 0, 255, 0.3);
+}
+
+.galaxy-completed {
+  border: 1px solid hsl(var(--accent));
+  box-shadow: 0 0 30px rgba(76, 0, 255, 0.4);
+}
+
+.current-pulse {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(76, 0, 255, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 15px rgba(76, 0, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(76, 0, 255, 0);
+  }
+} 
