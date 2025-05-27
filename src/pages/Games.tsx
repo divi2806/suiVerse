@@ -35,6 +35,7 @@ import {
 import { sendSuiReward } from '@/services/suiPaymentService';
 import { updateUserXp } from '@/services/firebaseService';
 import { rewardUser } from '@/services/userRewardsService'; 
+import { completeChallengeAndClaimRewards, updateChallengeProgress, DailyChallenge, ChallengeType } from '@/services/dailyChallengesService';
 
 const gamesList = [
   {
@@ -128,7 +129,14 @@ const Games = () => {
   useEffect(() => {
     // Only update connected state if it actually changes
     const isNowConnected = !!currentAccount;
+    console.log("Games: Wallet connection status check");
+    console.log("  Current account:", currentAccount?.address);
+    console.log("  walletAddress from context:", walletAddress);
+    console.log("  Current connected state:", connected);
+    console.log("  New connected state:", isNowConnected);
+    
     if (isNowConnected !== connected) {
+      console.log("Games: Updating connected state to", isNowConnected);
       setConnected(isNowConnected);
       
       // If we're disconnecting, clear the refs
@@ -137,152 +145,104 @@ const Games = () => {
         hasInitiallyFetchedRef.current = false;
       }
     }
-  }, [currentAccount, connected]);
+  }, [currentAccount, connected, walletAddress]);
 
   // Consolidated data fetching effect - only runs when wallet or userData changes
   useEffect(() => {
-    // Skip fetch if:
-    // 1. No wallet address 
-    // 2. Already fetching
-    // 3. Same wallet and we've already done initial fetch (unless forced)
-    if (!walletAddress || 
-        isFetchingRef.current || 
-        (walletAddress === prevWalletRef.current && hasInitiallyFetchedRef.current)) {
-      return;
+    // Fetch user stats when wallet changes
+    if (walletAddress && !isFetchingRef.current && 
+        (!hasInitiallyFetchedRef.current || walletAddress !== prevWalletRef.current)) {
+      // Force fetch any time wallet changes
+      fetchStats();
     }
-    
-    const fetchStats = async () => {
-      if (isFetchingRef.current) return; // Prevent concurrent fetch operations
+  }, [walletAddress, userData?.suiTokens, db]);
+
+  // State for daily challenges
+  const [dailyChallenges, setDailyChallenges] = useState<DailyChallenge[]>([]);
+  
+  // Ref to keep track of current challenges
+  const challengesRef = useRef<DailyChallenge[]>([]);
+  
+  // Update ref when dailyChallenges changes
+  useEffect(() => {
+    challengesRef.current = dailyChallenges;
+  }, [dailyChallenges]);
+
+  // Load daily challenges
+  useEffect(() => {
+    const fetchDailyChallenges = async () => {
+      console.log("Games: Fetching daily challenges, wallet status:", !!walletAddress);
+      
+      if (!walletAddress) {
+        console.log("Games: No wallet address, clearing challenges");
+        setDailyChallenges([]);
+        return;
+      }
       
       try {
-        isFetchingRef.current = true;
-        setIsLoading(true);
-        console.log("Fetching game stats for wallet:", walletAddress);
+        console.log("Games: Attempting to fetch challenges for wallet:", walletAddress);
+        // Get challenges from our service
+        const challenges = await import('@/services/dailyChallengesService')
+          .then(module => module.getUserDailyChallenges(walletAddress));
         
-        // Get user's leaderboard stats
-        const leaderboardRef = doc(db, 'leaderboard', walletAddress);
-        const leaderboardDoc = await getDoc(leaderboardRef);
+        console.log("Games: Successfully fetched challenges:", challenges.length);
         
-        // Get user's game results to find top score
-        const resultsQuery = query(
-          collection(db, 'game_results'),
-          where('userId', '==', walletAddress),
-          orderBy('score', 'desc'),
-          limit(1)
-        );
-        const resultsSnapshot = await getDocs(resultsQuery);
-        
-        // Get total earned SUI from transactions (all sources)
-        const rewardsQuery = query(
-          collection(db, 'user_rewards'),
-          where('userId', '==', walletAddress)
-        );
-        const rewardsSnapshot = await getDocs(rewardsQuery);
-        
-        // Get user's daily challenges
-        const challengesQuery = query(
-          collection(db, 'daily_challenges'),
-          where('userId', '==', walletAddress)
-        );
-        const challengesSnapshot = await getDocs(challengesQuery);
-        
-        // Calculate total earned SUI from rewards
-        let totalSui = 0;
-        rewardsSnapshot.forEach(doc => {
-          const data = doc.data();
-          if (data.amount && typeof data.amount === 'number') {
-            totalSui += data.amount;
-          }
-        });
-        
-        // Find top score across all games
-        let bestScore = 0;
-        resultsSnapshot.forEach(doc => {
-          const score = doc.data().score || 0;
-          if (score > bestScore) bestScore = score;
-        });
-        
-        // Count completed challenges
-        let completedCount = 0;
-        let challenges: any[] = [];
-        challengesSnapshot.forEach(doc => {
-          const data = doc.data();
-          challenges.push({ ...data, id: doc.id });
-          if (data.completed) completedCount++;
-        });
-        
-        // Use default challenges if none found
-        if (challenges.length === 0) {
-          challenges = [
-            {
-              id: 'daily-1',
-              title: 'Move Language Sprint',
-              description: 'Complete 3 Move code exercises in less than 10 minutes',
+        // For development: Override with test challenges if needed
+        if (process.env.NODE_ENV === 'development' && window.location.search.includes('test_challenge')) {
+          const { testConceptReviewChallenge } = await import('@/services/hardcodedChallenges');
+          
+          // Extract the challenge type from URL params if specified
+          const urlParams = new URLSearchParams(window.location.search);
+          const testType = urlParams.get('test_challenge');
+          
+          if (testType === 'concept_review') {
+            // Create a test concept review challenge
+            const testChallenge: DailyChallenge = {
+              id: `concept_review-test-${Date.now()}`,
+              title: "Test Concept Review Challenge",
+              description: "This is a test concept review challenge for development",
+              type: 'concept_review' as ChallengeType,
+              content: testConceptReviewChallenge,
+              difficulty: 'medium',
               xpReward: 100,
-              suiReward: 0.05,
+              suiReward: 0.1,
+              tokenReward: 0.1,
+              dateCreated: new Date(),
+              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
               completed: false,
-              progress: 0,
-              difficulty: 'easy' as const,
-            },
-            {
-              id: 'daily-2',
-              title: 'Bug Eliminator',
-              description: 'Find at least 5 bugs in the sample Move contracts',
-              xpReward: 150,
-              suiReward: 0.07,
-              completed: false,
-              progress: 0,
-              difficulty: 'medium' as const,
-              timeLeft: '8h 35m'
-            },
-            {
-              id: 'daily-3',
-              title: 'Smart Contract Master',
-              description: 'Score at least 500 points in the Smart Contract Puzzle game',
-              xpReward: 200,
-              suiReward: 0.08,
-              completed: false,
-              progress: 0,
-              difficulty: 'hard' as const,
-              timeLeft: '8h 35m'
-            }
-          ];
+              progress: 0
+            };
+            
+            setDailyChallenges([testChallenge]);
+            console.log("Games: Using test concept_review challenge");
+            return;
+          }
         }
         
         setDailyChallenges(challenges);
-        
-        // If we don't have any transaction data but user has SUI tokens in their profile,
-        // use that as a fallback
-        if (totalSui === 0 && userData?.suiTokens) {
-          totalSui = userData.suiTokens;
-        }
-        
-        console.log("Stats loaded:", { bestScore, totalSui, completedCount });
-        
-        // Update all state at once to minimize renders
-        setTopScore(bestScore);
-        setTotalEarnedSui(totalSui);
-        setCompletedChallenges(completedCount);
-        
-        // Store all game stats
-        if (leaderboardDoc.exists()) {
-          setUserGameStats(leaderboardDoc.data());
-        }
-        
-        // Mark that we've completed the fetch
-        prevWalletRef.current = walletAddress;
-        hasInitiallyFetchedRef.current = true;
-        
       } catch (error) {
-        console.error('Error fetching user stats:', error);
-      } finally {
-        setIsLoading(false);
-        isFetchingRef.current = false;
+        console.error("Games: Error fetching daily challenges:", error);
+        setDailyChallenges([]);
       }
     };
-    
-    fetchStats();
-  }, [walletAddress, userData?.suiTokens, db]);
+
+    if (walletAddress) {
+      fetchDailyChallenges();
+      
+      // Set up a timer to check for expired challenges
+      const checkExpiredInterval = setInterval(() => {
+        const now = new Date();
+        // If any challenge is expired, refresh the challenges
+        if (challengesRef.current.some(challenge => challenge.expiresAt && 
+            (challenge.expiresAt instanceof Date ? challenge.expiresAt < now : 
+             challenge.expiresAt.toDate() < now))) {
+          fetchDailyChallenges();
+        }
+      }, 60000); // Check every minute
+      
+      return () => clearInterval(checkExpiredInterval);
+    }
+  }, [walletAddress]);
 
   // Make handleConnect and handleDisconnect stable with useCallback
   const handleConnect = useCallback((address: string) => {
@@ -317,10 +277,6 @@ const Games = () => {
   };
 
   const { toast } = useToast();
-
-  
-
-  const [dailyChallenges, setDailyChallenges] = useState<any[]>([]);
 
   const [activeTab, setActiveTab] = useState('games');
   const [filteredGames, setFilteredGames] = useState(games);
@@ -552,95 +508,117 @@ const Games = () => {
   };
 
   const handleStartChallenge = (challengeId: string) => {
-    // Start the challenge based on ID
-    toast({
-      title: "Challenge Started",
-      description: "Good luck on your challenge!",
-      duration: 3000,
-    });
+    // This function is now handled by DailyChallenges component directly
+    // It's only needed for backwards compatibility
+    console.log("Legacy challenge start handler called for challenge:", challengeId);
   };
-
+  
   const handleClaimReward = async (challengeId: string) => {
-    if (!walletAddress) {
-      toast({
-        title: "Wallet Not Connected",
-        description: "Please connect your wallet to claim rewards",
-        duration: 3000,
-      });
-      return;
-    }
+    if (!walletAddress) return;
     
     try {
-      // Find the challenge
-      const challenge = dailyChallenges.find(c => c.id === challengeId);
-      if (!challenge) return;
+      console.log("Games: handleClaimReward called - only refreshing challenges, not claiming again");
       
-      // Send SUI reward
-      const result = await rewardUser(
-        walletAddress,
-        challenge.suiReward,
-        `Daily Challenge Reward: ${challenge.title}`,
-        'challenge'
-      );
-      
-      if (result.success) {
-        // Update challenge in Firestore
-        const challengeRef = doc(db, 'daily_challenges', challengeId);
-        await updateDoc(challengeRef, {
-          rewardClaimed: true,
-          rewardClaimedAt: serverTimestamp(),
-          txDigest: result.txDigest
-        });
-        
-        // Record the token transaction in user_rewards collection
-        await addDoc(collection(db, 'user_rewards'), {
-          userId: walletAddress,
-          amount: challenge.suiReward,
-          challengeId: challengeId,
-          sourceName: challenge.title,
-          txDigest: result.txDigest,
-          timestamp: serverTimestamp(),
-          source: 'challenge'
-        });
-        
-        // Update user XP
-        if (userData && walletAddress) {
-          await updateUserXp(walletAddress, challenge.xpReward);
-        }
-        
-        // Update total earned SUI for UI
-        setTotalEarnedSui(prev => prev + challenge.suiReward);
-        
-        // Refresh user data to update UI immediately
+      // Refresh user data to show updated balances
+      if (refreshUserData) {
         await refreshUserData();
-        
-        // Show toast notification
-        toast({
-          title: "Rewards Claimed!",
-          description: `You've received ${challenge.xpReward} XP and ${challenge.suiReward} SUI tokens`,
-          duration: 3000,
-        });
-        
-        // Schedule a deferred refresh to avoid infinite loops
-        setTimeout(() => {
-          if (walletAddress === prevWalletRef.current) {
-            hasInitiallyFetchedRef.current = false;
-          }
-        }, 500);
-      } else {
-        toast({
-          title: "Token Transfer Failed",
-          description: "SUI tokens couldn't be transferred. Please try again later.",
-          duration: 3000,
-        });
       }
+      
+      // Refresh challenges list
+      const challenges = await import('@/services/dailyChallengesService')
+        .then(module => module.getUserDailyChallenges(walletAddress));
+      setDailyChallenges(challenges);
+      
+      // Refresh stats
+      fetchStats();
     } catch (error) {
-      console.error('Error claiming reward:', error);
-      toast({
-        title: "Error",
-        description: "There was an error claiming your rewards. Please try again.",
-        duration: 3000,
+      console.error('Error refreshing data after reward claim:', error);
+    }
+  };
+
+  // Add the fetchStats function
+  const fetchStats = async () => {
+    if (isFetchingRef.current) return; // Prevent concurrent fetch operations
+    
+    try {
+      isFetchingRef.current = true;
+      setIsLoading(true);
+      console.log("Fetching game stats for wallet:", walletAddress);
+      
+      // Get user's leaderboard stats
+      const leaderboardRef = doc(db, 'leaderboard', walletAddress);
+      const leaderboardDoc = await getDoc(leaderboardRef);
+      
+      // Get user's game results to find top score
+      const resultsQuery = query(
+        collection(db, 'game_results'),
+        where('userId', '==', walletAddress),
+        orderBy('score', 'desc'),
+        limit(1)
+      );
+      const resultsSnapshot = await getDocs(resultsQuery);
+      
+      // Get total earned SUI from transactions (all sources)
+      const rewardsQuery = query(
+        collection(db, 'user_rewards'),
+        where('userId', '==', walletAddress)
+      );
+      const rewardsSnapshot = await getDocs(rewardsQuery);
+      
+      // Calculate total earned SUI from rewards
+      let totalSui = 0;
+      rewardsSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.amount && typeof data.amount === 'number') {
+          totalSui += data.amount;
+        }
       });
+      
+      // Find top score across all games
+      let bestScore = 0;
+      resultsSnapshot.forEach(doc => {
+        const score = doc.data().score || 0;
+        if (score > bestScore) bestScore = score;
+      });
+      
+      // Get completed challenges count by checking completed challenges in the daily challenges
+      let completedCount = 0;
+      try {
+        const challenges = await import('@/services/dailyChallengesService')
+          .then(module => module.getUserDailyChallenges(walletAddress));
+        
+        completedCount = challenges.filter(c => c.completed).length;
+      } catch (error) {
+        console.error('Error getting completed challenges count:', error);
+      }
+      
+      // If we don't have any transaction data but user has SUI tokens in their profile,
+      // use that as a fallback
+      if (totalSui === 0 && userData?.suiTokens) {
+        totalSui = userData.suiTokens;
+      }
+      
+      console.log("Stats loaded:", { bestScore, totalSui, completedCount });
+      
+      // Update all state at once to minimize renders
+      setTopScore(bestScore);
+      setTotalEarnedSui(totalSui);
+      setCompletedChallenges(completedCount);
+      
+      // Store all game stats
+      if (leaderboardDoc.exists()) {
+        setUserGameStats(leaderboardDoc.data());
+      }
+      
+      // Mark that we've completed the fetch
+      prevWalletRef.current = walletAddress;
+      hasInitiallyFetchedRef.current = true;
+      
+    } catch (error) {
+      console.error('Error fetching user stats:', error);
+    } finally {
+      setIsLoading(false);
+      isFetchingRef.current = false;
     }
   };
 
@@ -825,10 +803,25 @@ const Games = () => {
               </TabsContent>
               
               <TabsContent value="daily">
+                {/* Add debug information about challenges */}
+                {process.env.NODE_ENV === 'development' && dailyChallenges.length > 0 && (
+                  <div className="mb-4 p-2 bg-yellow-500/10 text-yellow-500 text-xs rounded border border-yellow-500/30">
+                    <div>Debug Info - Challenge Types:</div>
+                    <ul className="list-disc pl-5">
+                      {dailyChallenges.map((challenge, idx) => (
+                        <li key={idx}>
+                          Challenge {idx+1}: {challenge.type} - {challenge.title}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <DailyChallenges 
                   challenges={dailyChallenges}
                   onStartChallenge={handleStartChallenge}
                   onClaimReward={handleClaimReward}
+                  walletAddress={walletAddress}
+                  userId={walletAddress}
                 />
               </TabsContent>
             </Tabs>

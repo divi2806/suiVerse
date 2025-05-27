@@ -93,7 +93,26 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // Function to check if we've shown the streak popup today
   const hasShownStreakPopupToday = () => {
     try {
-      // Check all possible sources to ensure we don't show the popup multiple times
+      // We need to be more selective about when to show the streak popup
+      // Reset tracking if more than 24 hours have passed since last popup
+      
+      // Check when the last popup was shown (timestamp)
+      const lastTimestampStr = localStorage.getItem(STREAK_POPUP_TIMESTAMP_KEY);
+      if (lastTimestampStr) {
+        const lastTimestamp = parseInt(lastTimestampStr, 10);
+        const hoursSinceLastPopup = (Date.now() - lastTimestamp) / (1000 * 60 * 60);
+        
+        // If it's been over 24 hours since last popup, clear all flags to allow a new popup
+        if (hoursSinceLastPopup >= 24) {
+          console.log("Over 24 hours since last streak popup, clearing flags to allow new popup");
+          hasShownStreakPopup = false;
+          sessionStorage.removeItem(STREAK_POPUP_SESSION_KEY);
+          localStorage.removeItem(STREAK_POPUP_KEY);
+          return false;
+        }
+      }
+      
+      // Otherwise, check all possible sources to ensure we don't show the popup multiple times
       
       // 1. Check memory variable first (most immediate)
       if (hasShownStreakPopup) {
@@ -110,7 +129,6 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       }
       
       // 3. Check timestamp-based threshold (if shown in last 6 hours, don't show again)
-      const lastTimestampStr = localStorage.getItem(STREAK_POPUP_TIMESTAMP_KEY);
       if (lastTimestampStr) {
         const lastTimestamp = parseInt(lastTimestampStr, 10);
         const sixHoursMs = 6 * 60 * 60 * 1000;
@@ -260,28 +278,46 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const checkUserStreak = async () => {
     if (!walletAddress) return;
     
-    // Don't show streak popup if we've already shown it today
-    if (hasShownStreakPopupToday()) {
-      console.log("Already shown streak popup today, skipping");
-      return;
-    }
-    
     try {
+      // Check when the last popup was shown (timestamp)
+      const lastTimestampStr = localStorage.getItem(STREAK_POPUP_TIMESTAMP_KEY);
+      let forceCheck = false;
+      
+      if (lastTimestampStr) {
+        const lastTimestamp = parseInt(lastTimestampStr, 10);
+        const hoursSinceLastPopup = (Date.now() - lastTimestamp) / (1000 * 60 * 60);
+        
+        // If it's been over 24 hours since last popup, force a check
+        if (hoursSinceLastPopup >= 24) {
+          console.log("Over 24 hours since last streak popup, forcing check");
+          forceCheck = true;
+        }
+      } else {
+        // No record of ever showing popup, force check
+        forceCheck = true;
+      }
+      
+      // If not forcing check, see if we've already shown today
+      if (!forceCheck && hasShownStreakPopupToday()) {
+        console.log("Already shown streak popup today, skipping");
+        return;
+      }
+      
       console.log("Checking user streak...");
       const streakResult = await checkDailyStreak(walletAddress);
       
       // Make sure we have the latest user data after streak check
       await refreshUserData();
       
-      // Only show popup and set flags if it's actually a new day
-      if (streakResult.isNewDay) {
+      // Show popup if it's a new day or if we're forcing a check after 24+ hours
+      if (streakResult.isNewDay || forceCheck) {
         // Set flag to prevent showing streak popup again in this session
         updateStreakPopupDay();
         
         // Emit a custom event that other components can listen for
         const streakEvent = new CustomEvent('dailyStreakChecked', { 
           detail: {
-            isNewDay: streakResult.isNewDay,
+            isNewDay: true, // Force to true if we're doing a 24+ hour check
             currentStreak: streakResult.currentStreak,
             xpAwarded: streakResult.xpAwarded,
             isMilestone: streakResult.isMilestone,

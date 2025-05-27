@@ -1706,36 +1706,59 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
       lastLogin = new Date(0); // Very old date
     }
     
+    console.log('Last login timestamp:', lastLogin);
+    
+    // Get the date part only (strip time) for day comparison
     const lastLoginDate = new Date(lastLogin.getFullYear(), lastLogin.getMonth(), lastLogin.getDate()).getTime();
     
-    // If last login was before today (not same day)
-    if (lastLoginDate < today) {
+    // Also calculate hours since last login for the 24hr check
+    const hoursSinceLastLogin = (now.getTime() - lastLogin.getTime()) / (1000 * 60 * 60);
+    console.log('Hours since last login:', hoursSinceLastLogin);
+    
+    // Check if it's a new day AND more than 24 hours have passed since last login
+    // Either different calendar day OR more than 24 hours
+    const isDifferentDay = lastLoginDate < today;
+    const isMoreThan24Hours = hoursSinceLastLogin >= 24;
+    
+    // Determine if we should count this as a new streak day
+    const isStreakDay = isDifferentDay || isMoreThan24Hours;
+    
+    if (isStreakDay) {
+      console.log('New streak day detected - different day:', isDifferentDay, 'more than 24h:', isMoreThan24Hours);
+      
       const currentStreak = userData.streak || 0;
       let newStreak = currentStreak;
       let xpAwarded = 0;
       let suiAwarded = 0;
       let isMilestone = false;
       
-      // Check if exactly one day has passed (maintain streak)
-      const oneDayAgo = new Date(today);
-      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-      const oneDayAgoDate = oneDayAgo.getTime();
+      // Check if the user was active yesterday or within the 48-hour window
+      // This allows for maintaining streaks if users log in every 24-48 hours
+      const twoDaysAgo = new Date(today);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const twoDaysAgoTime = twoDaysAgo.getTime();
       
-      if (lastLoginDate === oneDayAgoDate) {
+      // If last login was within the valid streak window (yesterday or not more than 48 hours ago)
+      const withinStreakWindow = lastLoginDate >= twoDaysAgoTime || hoursSinceLastLogin <= 48;
+      
+      if (withinStreakWindow) {
         // Continue streak
         newStreak += 1;
         xpAwarded = XP_REWARDS.DAILY_STREAK;
+        console.log('Continuing streak to day:', newStreak);
         
         // Bonus for every 7 days
         if (newStreak % 7 === 0) {
           xpAwarded += XP_REWARDS.STREAK_MILESTONE;
           isMilestone = true;
+          console.log('Milestone reached!', newStreak, 'days');
           
           // Also award a mystery box every 7 days
           await awardMysteryBox(walletAddress, 'rare', 'streak-milestone');
         }
       } else {
         // Streak broken - reset to 1 for today
+        console.log('Streak broken - last login too old. Resetting to 1.');
         newStreak = 1;
         xpAwarded = XP_REWARDS.DAILY_STREAK; // Still award XP for the new day
       }
@@ -1746,6 +1769,8 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
       const newTotalXp = currentXp + xpAwarded;
       const newLevel = calculateLevel(newTotalXp);
       const leveledUp = newLevel > currentLevel;
+      
+      console.log('Updating user data with new streak:', newStreak);
       
       // Update user streak and login date
       await updateDoc(userRef, {
@@ -1800,13 +1825,15 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
     const currentStreak = userData.streak || 0;
     const isMilestone = currentStreak > 0 && currentStreak % 7 === 0;
     
+    console.log('Not a new streak day - updating login time only');
+    
     // Just update login time
     await updateDoc(userRef, {
       lastLogin: serverTimestamp()
     });
     
     return {
-      isNewDay: false, // Changed to false when it's not a new day
+      isNewDay: false, // Not a new day or not enough time has passed
       currentStreak: currentStreak,
       xpAwarded: 0, // No additional XP for multiple logins on same day
       suiAwarded: 0,

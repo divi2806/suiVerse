@@ -102,7 +102,7 @@ interface GalaxyType {
 const Learning = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { walletAddress, userData } = useAuth();
+  const { walletAddress, userData, refreshUserData } = useAuth();
   const currentAccount = useCurrentAccount();
   const [connected, setConnected] = useState(false);
   
@@ -255,133 +255,11 @@ const Learning = () => {
           return;
         }
         
-        // Get daily challenges from Firestore
-        const challengesRef = collection(db, 'learningProgress', walletAddress, 'dailyChallenges');
+        // Get challenges from our service
+        const challenges = await import('@/services/dailyChallengesService')
+          .then(module => module.getUserDailyChallenges(walletAddress));
         
-        // Get today's date (midnight UTC)
-        const today = new Date();
-        today.setUTCHours(0, 0, 0, 0);
-        
-        // Check for today's challenges
-        const challengesSnapshot = await getDocs(
-          query(challengesRef, where('date', '>=', today))
-        );
-        
-        if (challengesSnapshot.empty) {
-          // No challenges for today, generate new ones
-          const userProgressRef = doc(db, 'learningProgress', walletAddress);
-          const progressDoc = await getDoc(userProgressRef);
-          
-          if (progressDoc.exists()) {
-            const progress = progressDoc.data();
-            const userLevel = progress.level || 1;
-            
-            // Generate challenges based on user level
-            const newChallenges = [
-              {
-                id: `daily-learn-1-${today.getTime()}`,
-                title: 'Move Code Practice',
-                description: 'Complete today\'s Move coding exercises',
-                xpReward: 80 + (userLevel * 10), // Scale with level
-                suiReward: 0.1, // Fixed reward of 0.1 SUI
-                completed: false,
-                progress: 0,
-                difficulty: userLevel <= 3 ? 'easy' : 'medium',
-                date: today,
-                expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000), // Expires in 24 hours
-                rewardClaimed: false
-              },
-              {
-                id: `daily-learn-2-${today.getTime()}`,
-                title: 'Concept Master',
-                description: 'Review Sui concepts and complete a quiz',
-                xpReward: 60 + (userLevel * 5),
-                suiReward: 0.1, // Fixed reward of 0.1 SUI
-                completed: false,
-                progress: 0,
-                difficulty: 'easy',
-                date: today,
-                expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000), // Expires in 24 hours
-                rewardClaimed: false
-              }
-            ];
-            
-            // Add a more challenging task for higher level users
-            if (userLevel >= 5) {
-              newChallenges.push({
-                id: `daily-learn-3-${today.getTime()}`,
-                title: 'Advanced Challenge',
-                description: 'Complete an advanced Sui development challenge',
-                xpReward: 150 + (userLevel * 15),
-                suiReward: 0.1, // Fixed reward of 0.1 SUI
-                completed: false,
-                progress: 0,
-                difficulty: 'hard',
-                date: today,
-                expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000), // Expires in 24 hours
-                rewardClaimed: false
-              });
-            }
-            
-            // Save new challenges to Firestore
-            for (const challenge of newChallenges) {
-              const challengeDoc = doc(challengesRef, challenge.id);
-              await setDoc(challengeDoc, challenge);
-            }
-            
-            setDailyChallenges(newChallenges);
-          } else {
-            // Fallback to default challenges for connected users
-            const defaultChallenges = [
-              {
-                id: `daily-learn-1-${today.getTime()}`,
-                title: 'Move Syntax Basics',
-                description: 'Learn the fundamentals of Move syntax',
-                xpReward: 75,
-                suiReward: 0.1, // Fixed reward of 0.1 SUI
-                completed: false,
-                progress: 0,
-                difficulty: 'easy',
-                date: today,
-                expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000), // Expires in 24 hours
-                rewardClaimed: false
-              },
-              {
-                id: `daily-learn-2-${today.getTime()}`,
-                title: 'Sui Concepts',
-                description: 'Understand core Sui blockchain concepts',
-                xpReward: 50,
-                suiReward: 0.1, // Fixed reward of 0.1 SUI
-                completed: false,
-                progress: 0,
-                difficulty: 'easy',
-                date: today,
-                expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000), // Expires in 24 hours
-                rewardClaimed: false
-              }
-            ];
-            
-            // Save default challenges to Firestore
-            for (const challenge of defaultChallenges) {
-              const challengeDoc = doc(challengesRef, challenge.id);
-              await setDoc(challengeDoc, challenge);
-            }
-            
-            setDailyChallenges(defaultChallenges);
-          }
-        } else {
-          // Use existing challenges from Firestore
-          const challenges = challengesSnapshot.docs.map(doc => {
-            const data = doc.data();
-            // Convert timestamps to Date objects
-            return {
-              ...data,
-              date: data.date instanceof Timestamp ? data.date.toDate() : new Date(data.date),
-              expiresAt: data.expiresAt instanceof Timestamp ? data.expiresAt.toDate() : new Date(data.expiresAt)
-            };
-          });
-          setDailyChallenges(challenges);
-        }
+        setDailyChallenges(challenges);
       } catch (error) {
         console.error('Error fetching daily challenges:', error);
         // Leave challenges empty for error cases
@@ -397,7 +275,9 @@ const Learning = () => {
     const checkExpiredInterval = setInterval(() => {
       const now = new Date();
       // If any challenge is expired, refresh the challenges
-      if (dailyChallenges.some(challenge => challenge.expiresAt && challenge.expiresAt < now)) {
+      if (dailyChallenges.some(challenge => challenge.expiresAt && 
+          (challenge.expiresAt instanceof Date ? challenge.expiresAt < now : 
+           challenge.expiresAt.toDate() < now))) {
         fetchDailyChallenges();
       }
     }, 60000); // Check every minute
@@ -456,188 +336,42 @@ const Learning = () => {
   
   // Handlers for challenges
   const handleStartChallenge = async (challengeId: string) => {
-    if (!connected) {
-      toast({
-        title: "Connect Wallet",
-        description: "Please connect your wallet to participate in challenges",
-        variant: "default",
-      });
-      return;
-    }
-    
-    // Find the challenge
-    const challenge = dailyChallenges.find(c => c.id === challengeId);
-    if (!challenge) return;
-    
-    // Generate challenge content using Gemini API
-    const { generateContent } = await import('@/services/geminiService');
-    
-    // Generate appropriate challenge based on type
-    let challengePrompt = "";
-    if (challenge.title.includes('Code Practice')) {
-      challengePrompt = `Create a simple Sui Move coding exercise for a user at level ${userData?.level || 1}. The exercise should be straightforward and include:
-      1. A brief problem statement
-      2. Requirements for the code
-      3. A starting code template
-      4. The correct solution (clearly marked as SOLUTION for my reference only)`;
-    } else if (challenge.title.includes('Concept')) {
-      challengePrompt = `Create a 3 question quiz about Sui blockchain concepts for a user at level ${userData?.level || 1}. Include the correct answers and explanations.`;
-    } else if (challenge.title.includes('Advanced')) {
-      challengePrompt = `Create an advanced Sui Move coding challenge involving objects and capabilities for a user at level ${userData?.level || 1}. Include a problem statement, requirements, starter code, and the solution (marked as SOLUTION for my reference only).`;
-    }
-    
-    try {
-      // Store the challenge content in session storage
-      sessionStorage.setItem(`challenge_${challengeId}_prompt`, challengePrompt);
-      
-      // Show starting toast
-    toast({
-      title: "Challenge Started",
-      description: "Good luck with your learning challenge!",
-      duration: 3000,
-    });
-      
-      // Update the challenge progress in Firestore
-      if (walletAddress) {
-        const challengePath = `learningProgress/${walletAddress}/dailyChallenges/${challengeId}`;
-        await updateDoc(doc(db, challengePath), {
-          progress: 25, // Started
-          lastUpdated: serverTimestamp()
-        });
-        
-        // Update local state
-        setDailyChallenges(prev => 
-          prev.map(c => c.id === challengeId ? {...c, progress: 25} : c)
-        );
-      }
-      
-      // Open the challenge dialog or navigate to challenge page
-      // For demo, we'll simulate completion after a delay
-      simulateChallengeProgress(challengeId);
-    } catch (error) {
-      console.error("Error starting challenge:", error);
-      toast({
-        title: "Error",
-        description: "Failed to start the challenge. Please try again.",
-        variant: "destructive",
-      });
-    }
+    // This function is now handled by DailyChallenges component directly
+    // It's only needed for backwards compatibility
+    console.log("Legacy challenge start handler called for challenge:", challengeId);
   };
   
-  // Simulate challenge progress (in a real app, this would be real user interaction)
-  const simulateChallengeProgress = async (challengeId: string) => {
-    // Find the challenge
-    const challenge = dailyChallenges.find(c => c.id === challengeId);
-    if (!challenge || !walletAddress) return;
-    
-    // Update to in-progress after 2 seconds
-    setTimeout(async () => {
-      const challengePath = `learningProgress/${walletAddress}/dailyChallenges/${challengeId}`;
-      await updateDoc(doc(db, challengePath), {
-        progress: 50, // In progress
-        lastUpdated: serverTimestamp()
-      });
-      
-      // Update local state
-      setDailyChallenges(prev => 
-        prev.map(c => c.id === challengeId ? {...c, progress: 50} : c)
-      );
-      
-      // Complete after another 3 seconds
-      setTimeout(async () => {
-        await updateDoc(doc(db, challengePath), {
-          progress: 100, // Completed
-          completed: true,
-          lastUpdated: serverTimestamp()
-        });
-        
-        // Update local state
-        setDailyChallenges(prev => 
-          prev.map(c => c.id === challengeId ? {...c, progress: 100, completed: true} : c)
-        );
-        
-        // Add XP to user's account
-        await updateDoc(doc(db, 'learningProgress', walletAddress), {
-          totalXpEarned: increment(challenge.xpReward),
-          dailyChallengesCompleted: increment(1),
-          lastActivity: serverTimestamp()
-        });
-        
-        // Show completion toast
-        toast({
-          title: "Challenge Completed!",
-          description: `You earned ${challenge.xpReward} XP. Claim your SUI reward!`,
-          duration: 5000,
-        });
-      }, 3000);
-    }, 2000);
-  };
-
   const handleClaimReward = async (challengeId: string) => {
-    if (!walletAddress) {
-      toast({
-        title: "Connect Wallet",
-        description: "Please connect your wallet to claim rewards",
-        variant: "default",
-      });
-      return;
-    }
+    if (!walletAddress) return;
     
     try {
-      const challenge = dailyChallenges.find(c => c.id === challengeId);
-      if (!challenge || !challenge.completed) return;
+      const result = await import('@/services/dailyChallengesService')
+        .then(module => module.completeChallengeAndClaimRewards(challengeId, walletAddress));
       
-      // Use the sendSuiReward service to transfer SUI from admin wallet
-      const result = await sendSuiReward(
-        walletAddress, 
-        0.1, // Fixed amount of 0.1 SUI
-        `Daily Challenge: ${challenge.title}`
-      );
-      
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to send SUI reward');
+      if (result.success) {
+        toast({
+          title: "Rewards Claimed!",
+          description: `${result.reward} SUI has been added to your wallet.`,
+          duration: 3000,
+        });
+        
+        // Refresh user data to show updated balances
+        refreshUserData();
+        
+        // Refresh challenges list
+        const challenges = await import('@/services/dailyChallengesService')
+          .then(module => module.getUserDailyChallenges(walletAddress));
+        setDailyChallenges(challenges);
+      } else {
+        throw new Error("Failed to claim reward");
       }
-      
-      // Record the transaction in Firestore
-      await addDoc(collection(db, 'transactions'), {
-        walletAddress,
-        amount: 0.1, // Fixed amount of 0.1 SUI
-        reason: `Daily Challenge: ${challenge.title}`,
-        type: 'challenge_reward',
-        challengeId,
-        txDigest: result.txDigest,
-        timestamp: serverTimestamp()
-      });
-      
-      // Mark challenge as claimed in Firestore
-      const challengePath = `learningProgress/${walletAddress}/dailyChallenges/${challengeId}`;
-      await updateDoc(doc(db, challengePath), {
-        rewardClaimed: true,
-        claimedAt: serverTimestamp()
-      });
-      
-      // Update user's total SUI earned in learning progress
-      await updateDoc(doc(db, 'learningProgress', walletAddress), {
-        totalSuiEarned: increment(0.1) // Add 0.1 SUI to tracking
-      });
-      
-      // Update local state
-      setDailyChallenges(prev => 
-        prev.map(c => c.id === challengeId ? {...c, rewardClaimed: true} : c)
-      );
-      
-      // Show success toast
-    toast({
-      title: "Rewards Claimed!",
-        description: `0.1 SUI has been sent to your wallet. Transaction ID: ${result.txDigest?.slice(0, 8)}...`,
-      duration: 3000,
-    });
     } catch (error) {
-      console.error("Error claiming reward:", error);
+      console.error('Error claiming reward:', error);
       toast({
         title: "Error",
         description: "Failed to claim rewards. Please try again.",
         variant: "destructive",
+        duration: 3000,
       });
     }
   };
