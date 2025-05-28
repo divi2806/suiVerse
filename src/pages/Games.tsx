@@ -129,14 +129,14 @@ const Games = () => {
   useEffect(() => {
     // Only update connected state if it actually changes
     const isNowConnected = !!currentAccount;
-    console.log("Games: Wallet connection status check");
-    console.log("  Current account:", currentAccount?.address);
-    console.log("  walletAddress from context:", walletAddress);
-    console.log("  Current connected state:", connected);
-    console.log("  New connected state:", isNowConnected);
+    
+    
+    
+    
+    
     
     if (isNowConnected !== connected) {
-      console.log("Games: Updating connected state to", isNowConnected);
+      
       setConnected(isNowConnected);
       
       // If we're disconnecting, clear the refs
@@ -171,21 +171,21 @@ const Games = () => {
   // Load daily challenges
   useEffect(() => {
     const fetchDailyChallenges = async () => {
-      console.log("Games: Fetching daily challenges, wallet status:", !!walletAddress);
+      
       
       if (!walletAddress) {
-        console.log("Games: No wallet address, clearing challenges");
+        
         setDailyChallenges([]);
         return;
       }
       
       try {
-        console.log("Games: Attempting to fetch challenges for wallet:", walletAddress);
+        
         // Get challenges from our service
         const challenges = await import('@/services/dailyChallengesService')
           .then(module => module.getUserDailyChallenges(walletAddress));
         
-        console.log("Games: Successfully fetched challenges:", challenges.length);
+        
         
         // For development: Override with test challenges if needed
         if (process.env.NODE_ENV === 'development' && window.location.search.includes('test_challenge')) {
@@ -214,14 +214,14 @@ const Games = () => {
             };
             
             setDailyChallenges([testChallenge]);
-            console.log("Games: Using test concept_review challenge");
+            
             return;
           }
         }
         
         setDailyChallenges(challenges);
       } catch (error) {
-        console.error("Games: Error fetching daily challenges:", error);
+        
         setDailyChallenges([]);
       }
     };
@@ -315,7 +315,7 @@ const Games = () => {
       });
       
       if (!gameData) {
-        console.error('Game data not found:', gameId);
+        
         return;
       }
       
@@ -408,7 +408,7 @@ const Games = () => {
             });
           }
         } catch (error) {
-          console.error('Error awarding SUI tokens:', error);
+          
         }
       }
       
@@ -491,7 +491,7 @@ const Games = () => {
       }, 500);
       
     } catch (error) {
-      console.error('Error saving game results:', error);
+      
       toast({
         title: "Game Completed!",
         description: `You scored ${score} points, but there was an error saving your results.`,
@@ -510,14 +510,14 @@ const Games = () => {
   const handleStartChallenge = (challengeId: string) => {
     // This function is now handled by DailyChallenges component directly
     // It's only needed for backwards compatibility
-    console.log("Legacy challenge start handler called for challenge:", challengeId);
+    
   };
   
   const handleClaimReward = async (challengeId: string) => {
     if (!walletAddress) return;
     
     try {
-      console.log("Games: handleClaimReward called - only refreshing challenges, not claiming again");
+      
       
       // Refresh user data to show updated balances
       if (refreshUserData) {
@@ -532,7 +532,7 @@ const Games = () => {
       // Refresh stats
       fetchStats();
     } catch (error) {
-      console.error('Error refreshing data after reward claim:', error);
+      
     }
   };
 
@@ -543,7 +543,7 @@ const Games = () => {
     try {
       isFetchingRef.current = true;
       setIsLoading(true);
-      console.log("Fetching game stats for wallet:", walletAddress);
+      
       
       // Get user's leaderboard stats
       const leaderboardRef = doc(db, 'leaderboard', walletAddress);
@@ -589,7 +589,7 @@ const Games = () => {
         
         completedCount = challenges.filter(c => c.completed).length;
       } catch (error) {
-        console.error('Error getting completed challenges count:', error);
+        
       }
       
       // If we don't have any transaction data but user has SUI tokens in their profile,
@@ -598,7 +598,7 @@ const Games = () => {
         totalSui = userData.suiTokens;
       }
       
-      console.log("Stats loaded:", { bestScore, totalSui, completedCount });
+      
       
       // Update all state at once to minimize renders
       setTopScore(bestScore);
@@ -615,7 +615,7 @@ const Games = () => {
       hasInitiallyFetchedRef.current = true;
       
     } catch (error) {
-      console.error('Error fetching user stats:', error);
+      
     } finally {
       setIsLoading(false);
       isFetchingRef.current = false;

@@ -4,13 +4,13 @@ import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 const selectApiKey = (): string => {
   // First try env variable for Vite 
   if (import.meta.env.VITE_GEMINI_API_KEY) {
-    console.log("[Gemini] Using API key from VITE_GEMINI_API_KEY");
+    
     return import.meta.env.VITE_GEMINI_API_KEY;
   }
   
   // Try alternative env variables (for different build systems)
   if (import.meta.env.REACT_APP_GEMINI_API_KEY) {
-    console.log("[Gemini] Using API key from REACT_APP_GEMINI_API_KEY");
+    
     return import.meta.env.REACT_APP_GEMINI_API_KEY;
   }
   
@@ -22,12 +22,12 @@ const selectApiKey = (): string => {
   
   // Try each backup key in order
   for (const key of backupKeys) {
-    console.log("[Gemini] Trying backup API key");
+    
     return key;
   }
   
   // Last resort fallback
-  console.warn("[Gemini] No valid API key found, using default fallback key");
+  
   return 'AIzaSyC9YKF89cnfSAAzM6TilPY29Ea9LeiIf8s';
 };
 
@@ -67,9 +67,9 @@ const MODULE_KNOWLEDGE = {
 let genAI;
 try {
   genAI = new GoogleGenerativeAI(API_KEY);
-  console.log("[Gemini] API initialized successfully");
+  
 } catch (error) {
-  console.error("[Gemini] Failed to initialize API:", error);
+  
   // Create a fallback implementation if initialization fails
   genAI = {
     getGenerativeModel: () => ({
@@ -96,11 +96,11 @@ function getModel(modelName: string): GenerativeModel {
           maxOutputTokens: 8192,
         },
       });
-      console.log(`[Gemini] Created model instance for: ${modelName}`);
+      
     }
     return modelInstances[modelName];
   } catch (error) {
-    console.error(`[Gemini] Error creating model instance for ${modelName}:`, error);
+    
     // Return a dummy model that always throws
     return {
       generateContent: async () => {
@@ -187,7 +187,7 @@ const MODULE_TOPICS = {
 export const generateLearningModule = async (moduleId: string): Promise<ModuleContent> => {
   try {
     const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
-    console.log(`[generateLearningModule] Generating content for topic: ${topic}`);
+    
     
     // Create a clearer, more structured prompt that encourages proper JSON formatting
     const prompt = `Create an engaging learning module about "${topic}" for a space-themed educational platform about the Sui blockchain.
@@ -224,13 +224,13 @@ Return your response as a valid JSON object with these fields:
 
 Make sure the content is accurate, educational, and follows a logical progression of complexity.`;
 
-    console.log(`[generateLearningModule] Sending prompt to Gemini API for ${moduleId}...`);
+    
     
     try {
       const model = getModel(SMART_CONTRACT_MODEL);
       const result = await model.generateContent(prompt);
       const text = result.response.text();
-      console.log(`[generateLearningModule] Received response from Gemini, length: ${text.length} characters`);
+      
       
       // Try multiple approaches to extract valid JSON
       let parsedContent = null;
@@ -240,7 +240,7 @@ Make sure the content is accurate, educational, and follows a logical progressio
           const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
           if (jsonMatch && jsonMatch[1]) {
             const cleanedJson = jsonMatch[1].trim();
-            console.log(`[generateLearningModule] Extracted JSON from code block: ${cleanedJson.substring(0, 100)}...`);
+            
             return JSON.parse(cleanedJson);
           }
           throw new Error("No JSON found in code block");
@@ -251,7 +251,7 @@ Make sure the content is accurate, educational, and follows a logical progressio
           const jsonMatch = text.match(/{[\s\S]*}/);
           if (jsonMatch) {
             const cleanedJson = jsonMatch[0].trim();
-            console.log(`[generateLearningModule] Extracted JSON using brace matching: ${cleanedJson.substring(0, 100)}...`);
+            
             return JSON.parse(cleanedJson);
           }
           throw new Error("No JSON found using brace matching");
@@ -259,7 +259,7 @@ Make sure the content is accurate, educational, and follows a logical progressio
         
         // Method 3: Try to parse the entire text as JSON
         () => {
-          console.log(`[generateLearningModule] Attempting to parse entire response as JSON`);
+          
           return JSON.parse(text);
         }
       ];
@@ -270,41 +270,41 @@ Make sure the content is accurate, educational, and follows a logical progressio
           parsedContent = method();
           if (parsedContent) break;
         } catch (error) {
-          console.warn(`[generateLearningModule] JSON extraction method failed:`, error);
+          
           // Continue to next method
         }
       }
       
       // If no method worked, try a different approach - generate just quiz questions
       if (!parsedContent) {
-        console.warn(`[generateLearningModule] Could not parse JSON response, will generate quiz questions separately`);
+        
         
         // Create a basic module structure
         const basicModule = createFallbackModule(moduleId, topic);
         
         // Try to generate just the quiz questions
         try {
-          console.log(`[generateLearningModule] Generating quiz questions separately for ${moduleId}...`);
+          
           const quizQuestions = await generateQuizQuestions(topic, 5, 'medium');
           
           if (quizQuestions && quizQuestions.length > 0) {
-            console.log(`[generateLearningModule] Successfully generated ${quizQuestions.length} quiz questions separately`);
+            
             basicModule.quiz = quizQuestions;
           }
         } catch (quizError) {
-          console.error(`[generateLearningModule] Failed to generate separate quiz questions:`, quizError);
+          
         }
         
         return basicModule;
       }
       
       // Successfully parsed JSON response
-      console.log(`[generateLearningModule] Successfully parsed JSON for ${moduleId}`);
+      
       
       // Check if quiz questions exist and have the correct format
       let quizQuestions = [];
       if (parsedContent.quiz && Array.isArray(parsedContent.quiz)) {
-        console.log(`[generateLearningModule] ${parsedContent.quiz.length} quiz questions found in response`);
+        
         
         // Validate quiz questions format
         quizQuestions = parsedContent.quiz.map((q: any, index: number) => {
@@ -322,13 +322,13 @@ Make sure the content is accurate, educational, and follows a logical progressio
           };
         });
       } else {
-        console.warn(`[generateLearningModule] No quiz array found in API response or invalid format`);
+        
         // Generate quiz questions separately
         try {
           quizQuestions = await generateQuizQuestions(topic, 5, 'medium');
-          console.log(`[generateLearningModule] Generated ${quizQuestions.length} quiz questions separately`);
+          
         } catch (quizError) {
-          console.error(`[generateLearningModule] Failed to generate separate quiz questions:`, quizError);
+          
           quizQuestions = createFallbackQuestions(topic, 5, 'medium');
         }
       }
@@ -355,7 +355,7 @@ Make sure the content is accurate, educational, and follows a logical progressio
         summary: parsedContent.summary || `You've completed the ${topic} module. Great job!`
       };
     } catch (apiError) {
-      console.error(`[generateLearningModule] API error for ${moduleId}:`, apiError);
+      
       
       // Use dedicated quiz generation as a backup
       const fallbackModule = createFallbackModule(moduleId, topic);
@@ -367,13 +367,13 @@ Make sure the content is accurate, educational, and follows a logical progressio
           fallbackModule.quiz = quizQuestions;
         }
       } catch (quizError) {
-        console.error(`[generateLearningModule] Failed to generate backup quiz questions:`, quizError);
+        
       }
       
       return fallbackModule;
     }
   } catch (error) {
-    console.error(`[generateLearningModule] Fatal error for ${moduleId}:`, error);
+    
     return createFallbackModule(moduleId, moduleId);
   }
 };
@@ -419,27 +419,27 @@ const moduleCache: Record<string, ModuleContent> = {};
  */
 export const getModule = async (moduleId: string): Promise<ModuleContent> => {
   if (moduleCache[moduleId]) {
-    console.log(`[getModule] Using cached module data for ${moduleId}`);
+    
     return moduleCache[moduleId];
   }
   
   try {
-    console.log(`[getModule] Generating learning module for ${moduleId}...`);
+    
     const module = await generateLearningModule(moduleId);
     
     // Verify that quiz questions are valid
     if (!module.quiz || module.quiz.length === 0) {
-      console.warn(`[getModule] No quiz questions generated for module ${moduleId}, using fallbacks`);
+      
       // If quiz questions are missing, add fallback questions
       const topic = MODULE_KNOWLEDGE[moduleId as keyof typeof MODULE_KNOWLEDGE] || 'Sui blockchain';
       module.quiz = createFallbackQuestions(topic, 5, 'medium');
-      console.log(`[getModule] Added ${module.quiz.length} fallback questions`);
+      
     } else {
-      console.log(`[getModule] Successfully generated ${module.quiz.length} quiz questions from API`);
+      
       
       // Log one example question to verify format
       if (module.quiz.length > 0) {
-        console.log(`[getModule] Example question: ${JSON.stringify(module.quiz[0])}`);
+        
       }
       
       // Verify each question has all required properties
@@ -447,7 +447,7 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
       module.quiz = module.quiz.map((question, index) => {
         // Ensure question has all required fields
         if (!question.question || !question.options || !question.explanation || question.correctAnswer === undefined) {
-          console.warn(`[getModule] Invalid quiz question at index ${index}, using fallback`);
+          
           fixedQuestions++;
           return {
             id: `${moduleId}-q${index + 1}`,
@@ -466,19 +466,19 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
       });
       
       if (fixedQuestions > 0) {
-        console.log(`[getModule] Fixed ${fixedQuestions} invalid questions with fallbacks`);
+        
       }
     }
     
     moduleCache[moduleId] = module;
-    console.log(`[getModule] Module ${moduleId} cached and ready to use`);
+    
     return module;
   } catch (error) {
-    console.error(`[getModule] Error generating module ${moduleId}:`, error);
+    
     // Return a complete fallback module with guaranteed content
     const fallbackModule = createFallbackModule(moduleId, 
       MODULE_KNOWLEDGE[moduleId as keyof typeof MODULE_KNOWLEDGE] || 'Sui blockchain');
-    console.log(`[getModule] Using complete fallback module for ${moduleId} due to error`);
+    
     moduleCache[moduleId] = fallbackModule;
     return fallbackModule;
   }
@@ -493,7 +493,7 @@ export const generateContent = async (prompt: string, modelName = DEFAULT_MODEL)
     const result = await model.generateContent(prompt);
     return result.response.text();
   } catch (error) {
-    console.error('Error generating content with Gemini:', error);
+    
     return 'I encountered an error generating a response. Please try again later.';
   }
 };
@@ -548,7 +548,7 @@ Please format your response with:
     
     return { code, explanation };
   } catch (error) {
-    console.error('Error generating smart contract with Gemini:', error);
+    
     return { 
       code: '// An error occurred while generating the smart contract', 
       explanation: 'I encountered an error generating the smart contract. Please try again later or refine your request.'
@@ -634,10 +634,10 @@ Ensure that:
 
 Return ONLY a valid JSON array of question objects without any text before or after.`;
 
-    console.log(`[generateQuizQuestions] Sending prompt for ${topic} questions...`);
+    
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
-    console.log(`[generateQuizQuestions] Received response of length: ${responseText.length}`);
+    
     
     // Try multiple JSON extraction methods
     let parsedQuestions;
@@ -647,7 +647,7 @@ Return ONLY a valid JSON array of question objects without any text before or af
         const jsonRegex = /\[\s*\{[\s\S]*\}\s*\]/;
         const jsonMatch = responseText.match(jsonRegex);
         if (jsonMatch) {
-          console.log(`[generateQuizQuestions] Extracted JSON using array regex matcher`);
+          
           return JSON.parse(jsonMatch[0]);
         }
         throw new Error("No JSON array found in response");
@@ -659,7 +659,7 @@ Return ONLY a valid JSON array of question objects without any text before or af
         const match = responseText.match(codeBlockRegex);
         if (match && match[1]) {
           const cleanedJson = match[1].trim();
-          console.log(`[generateQuizQuestions] Extracted JSON from code block`);
+          
           return JSON.parse(cleanedJson);
         }
         throw new Error("No JSON found in code block");
@@ -671,7 +671,7 @@ Return ONLY a valid JSON array of question objects without any text before or af
         const lastBracket = responseText.lastIndexOf(']') + 1;
         if (firstBracket !== -1 && lastBracket > firstBracket) {
           const jsonText = responseText.substring(firstBracket, lastBracket);
-          console.log(`[generateQuizQuestions] Extracted JSON using bracket positions`);
+          
           return JSON.parse(jsonText);
         }
         throw new Error("No valid JSON brackets found");
@@ -679,7 +679,7 @@ Return ONLY a valid JSON array of question objects without any text before or af
       
       // Method 4: As a last resort, try to parse the entire text as JSON
       () => {
-        console.log(`[generateQuizQuestions] Attempting to parse entire response as JSON`);
+        
         return JSON.parse(responseText);
       }
     ];
@@ -689,18 +689,18 @@ Return ONLY a valid JSON array of question objects without any text before or af
       try {
         parsedQuestions = method();
         if (parsedQuestions && Array.isArray(parsedQuestions) && parsedQuestions.length > 0) {
-          console.log(`[generateQuizQuestions] Successfully extracted ${parsedQuestions.length} questions`);
+          
           break;
         }
       } catch (error) {
-        console.warn(`[generateQuizQuestions] Extraction method failed:`, error);
+        
         // Continue to next method
       }
     }
     
     // If no extraction method worked, fall back to default questions
     if (!parsedQuestions || !Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
-      console.warn(`[generateQuizQuestions] All JSON extraction methods failed, using fallback questions`);
+      
       return createFallbackQuestions(topic, count, difficulty);
     }
     
@@ -722,10 +722,10 @@ Return ONLY a valid JSON array of question objects without any text before or af
       return validQuestion;
     });
     
-    console.log(`[generateQuizQuestions] Generated ${validatedQuestions.length} validated questions`);
+    
     return validatedQuestions;
   } catch (error) {
-    console.error('[generateQuizQuestions] Error generating questions with Gemini:', error);
+    
     return createFallbackQuestions(topic, count, difficulty);
   }
 };

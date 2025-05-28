@@ -3,7 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { CodingChallenge } from '@/services/geminiService';
-import { Bug, CheckCircle, HelpCircle, Rocket, XCircle } from 'lucide-react';
+import { Bug, CheckCircle, HelpCircle, Rocket, XCircle, Loader2 } from 'lucide-react';
+import { useToast } from "@/components/ui/use-toast";
+import { generateContent } from '@/services/geminiService';
 import './alien-challenge.css';
 
 interface AlienChallengeProps {
@@ -19,11 +21,13 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
   const [currentHint, setCurrentHint] = useState(0);
   const [showSolution, setShowSolution] = useState(false);
   const [battleAnimation, setBattleAnimation] = useState(false);
+  const [evaluationFeedback, setEvaluationFeedback] = useState('');
+  const { toast } = useToast();
   
   // Debug log to see if the editor is getting initialized with the right value
   useEffect(() => {
-    console.log("Challenge code snippet:", challenge.codeSnippet);
-    console.log("Editor initialized with:", code);
+    
+    
   }, []);
 
   // Reset state when challenge changes
@@ -35,32 +39,163 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
     setCurrentHint(0);
     setShowSolution(false);
     setBattleAnimation(false);
+    setEvaluationFeedback('');
   }, [challenge.id]);
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    console.log("Code changing to:", e.target.value);
+    
     setCode(e.target.value);
   };
 
-  const handleSubmit = () => {
+  // Production-ready code solution checker using Gemini AI
+  const checkCodeSolution = async (userCode: string, solution: string): Promise<{
+    success: boolean;
+    feedback: string;
+  }> => {
+    try {
+      // If user code is empty or unchanged from template, fail immediately
+      if (!userCode.trim() || userCode === challenge.codeSnippet) {
+        return {
+          success: false,
+          feedback: "You haven't modified the code template. Please implement your solution."
+        };
+      }
+      
+      // Craft a detailed prompt for Gemini API
+      const prompt = `
+        You are evaluating a student's solution to a Sui Move programming challenge.
+        
+        CHALLENGE CONTEXT:
+        ${challenge.scenario}
+        
+        TASK:
+        ${challenge.task}
+        
+        CORRECT SOLUTION:
+        \`\`\`
+        ${solution}
+        \`\`\`
+        
+        STUDENT'S SOLUTION:
+        \`\`\`
+        ${userCode}
+        \`\`\`
+        
+        Analyze the student's solution and determine if it correctly implements the required functionality.
+        
+        Respond in the following JSON format:
+        {
+          "isCorrect": true/false,
+          "feedback": "Brief explanation of why the solution is correct or what's wrong",
+          "correctnessScore": 0-100 (a score representing how close the solution is to being correct)
+        }
+        
+        Only consider the solution correct if it properly implements the required logic, even if the implementation differs from the reference solution.
+      `;
+      
+      // Call Gemini API
+      
+      const response = await generateContent(prompt);
+      
+      try {
+        // Parse JSON response
+        const parsedResponse = JSON.parse(response);
+        
+        
+        // Check if solution is correct based on AI evaluation
+        const isCorrect = parsedResponse.isCorrect === true || 
+                          (parsedResponse.correctnessScore && parsedResponse.correctnessScore >= 80);
+        
+        return {
+          success: isCorrect,
+          feedback: parsedResponse.feedback || 
+                    (isCorrect ? "Your solution works correctly!" : "Your solution has some issues.")
+        };
+      } catch (parseError) {
+        
+        
+        
+        // If JSON parsing fails, do a simpler text-based check
+        const isCorrect = response.toLowerCase().includes("correct") && 
+                         !response.toLowerCase().includes("incorrect") &&
+                         !response.toLowerCase().includes("error");
+        
+        return {
+          success: isCorrect,
+          feedback: isCorrect ? 
+            "Your solution appears to work correctly." : 
+            "Your solution may have some issues. Check your implementation."
+        };
+      }
+    } catch (error) {
+      
+      
+      // Fallback to simple checks if AI evaluation fails
+      const cleanUserCode = userCode.replace(/\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').toLowerCase();
+      const cleanSolution = solution.replace(/\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').toLowerCase();
+      
+      // Extract key patterns that should be present in the solution
+      const keyPatterns = [
+        'struct',
+        'fun',
+        'public',
+        'entry',
+        'transfer',
+      ].filter(pattern => cleanSolution.includes(pattern));
+      
+      // Count how many key patterns are present in user code
+      const matchedPatterns = keyPatterns.filter(pattern => cleanUserCode.includes(pattern));
+      const matchPercentage = (matchedPatterns.length / keyPatterns.length) * 100;
+      
+      return {
+        success: matchPercentage >= 70,
+        feedback: `Evaluation completed with ${Math.round(matchPercentage)}% pattern match.`
+      };
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!code.trim() || code === challenge.codeSnippet) {
+      toast({
+        title: "Empty Solution",
+        description: "Please implement your solution before submitting.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     setIsSubmitting(true);
     setBattleAnimation(true);
     
-    console.log("Submitting code:", code);
-    
-    // Simulate code evaluation - in a real app, this would actually check the code
-    setTimeout(() => {
-      const success = checkCodeSolution(code, challenge.solution);
-      console.log("Code check result:", success);
-      setResult(success ? 'success' : 'failure');
-      setIsSubmitting(false);
+    try {
       
-      if (success) {
+      
+      // Evaluate the code using AI
+      const evaluation = await checkCodeSolution(code, challenge.solution);
+      
+      
+      // Set the result and feedback
+      setResult(evaluation.success ? 'success' : 'failure');
+      setEvaluationFeedback(evaluation.feedback);
+      
+      // If successful, notify the parent component after a short delay
+      if (evaluation.success) {
         setTimeout(() => {
           onComplete(challenge.id, true);
         }, 2000);
       }
-    }, 3000);
+    } catch (error) {
+      
+      toast({
+        title: "Evaluation Error",
+        description: "An error occurred while evaluating your code. Please try again.",
+        variant: "destructive"
+      });
+      setResult('failure');
+      setEvaluationFeedback("We couldn't properly evaluate your code due to a system error.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleShowHint = () => {
@@ -81,27 +216,13 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
     setCode(challenge.codeSnippet);
     setResult(null);
     setBattleAnimation(false);
+    setEvaluationFeedback('');
   };
 
   const handleGiveUp = () => {
     setShowSolution(true);
     setResult('failure');
     onComplete(challenge.id, false);
-  };
-
-  // Simple code solution checker (in a real app, this would be more sophisticated)
-  const checkCodeSolution = (userCode: string, solution: string): boolean => {
-    // For debugging - always succeed if the string "transfer::transfer" is in the code
-    if (userCode.includes("transfer::transfer")) {
-      return true;
-    }
-    
-    // Remove whitespace and comments for comparison
-    const cleanUserCode = userCode.replace(/\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
-    const cleanSolution = solution.replace(/\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
-    
-    // Very simple check - in a real app, you'd have a more sophisticated parser
-    return cleanUserCode.includes(cleanSolution.substring(10, 40));
   };
 
   return (
@@ -236,52 +357,40 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
                   onChange={handleCodeChange}
                   className="w-full h-60 bg-black/90 text-primary font-mono p-4 border-none focus:outline-none"
                   disabled={isSubmitting || showSolution || result === 'success'}
-                  onClick={() => console.log("Editor clicked")}
+                  onClick={() => {}}
                 />
               </div>
               
-              <div className="flex justify-end">
-                {!result && (
-                  <Button 
-                    onClick={handleSubmit}
-                    disabled={isSubmitting}
-                    className="neon-button"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <span className="loading mr-2"></span>
-                        Battling Alien...
-                      </>
-                    ) : (
-                      <>
-                        <Rocket className="mr-2 h-4 w-4" />
-                        Launch Attack
-                      </>
-                    )}
-                  </Button>
+              <div className="flex justify-between mt-4">
+                <div className="flex gap-2">
+                  {isSubmitting && (
+                    <Button disabled className="gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Evaluating...
+                    </Button>
+                  )}
+                  
+                  {result === null && !isSubmitting && (
+                    <Button onClick={handleSubmit} className="gap-2 bg-gradient-to-r from-primary to-indigo-600">
+                      <Rocket className="h-4 w-4" />
+                      Submit Code
+                    </Button>
+                  )}
+                </div>
+                
+                {evaluationFeedback && (
+                  <div className={`p-3 rounded-md ${result === 'success' ? 'bg-green-500/20' : 'bg-red-500/20'} max-w-full mt-4`}>
+                    <div className="flex items-start gap-2">
+                      {result === 'success' ? (
+                        <CheckCircle className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
+                      )}
+                      <p className="text-sm">{evaluationFeedback}</p>
+                    </div>
+                  </div>
                 )}
               </div>
-              
-              {result && (
-                <div className={`mt-4 p-4 rounded-lg ${
-                  result === 'success' ? 'bg-green-500/20 border border-green-500/50' : 
-                  'bg-red-500/20 border border-red-500/50'
-                }`}>
-                  <div className="flex items-center">
-                    {result === 'success' ? (
-                      <>
-                        <CheckCircle className="h-6 w-6 mr-2 text-green-400" />
-                        <span className="font-medium">Success! You defeated the alien!</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="h-6 w-6 mr-2 text-red-400" />
-                        <span className="font-medium">Your attack failed! Try again.</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>

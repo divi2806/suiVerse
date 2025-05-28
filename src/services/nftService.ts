@@ -108,11 +108,11 @@ export const mintModuleCompletionNFT = async (
   moduleId: number
 ): Promise<{ success: boolean; txDigest?: string; message?: string; nftId?: string; transaction?: TransactionBlock }> => {
   try {
-    console.log(`Preparing NFT mint for module ${moduleId} to ${recipientAddress}`);
+    
     
     // Improved address validation
     if (!recipientAddress || typeof recipientAddress !== 'string') {
-      console.error('Invalid recipient address format:', recipientAddress);
+      
       return { 
         success: false, 
         message: 'Invalid recipient address format' 
@@ -124,12 +124,12 @@ export const mintModuleCompletionNFT = async (
     const forceRealMinting = import.meta.env.VITE_FORCE_REAL_MINTING === 'true' || DEFAULT_FORCE_REAL_MINTING;
     
     if (forceRealMinting && (isTestMode || recipientAddress === 'test-wallet')) {
-      console.log(`⚠️ TEST WALLET DETECTED BUT FORCE_REAL_MINTING IS ENABLED`);
-      console.log(`Will use real blockchain transaction for test wallet`);
+      
+      
     }
     
     if ((isTestMode || recipientAddress === 'test-wallet') && !forceRealMinting) {
-      console.log(`⚠️ TEST MODE ACTIVE: Using simulated NFT minting instead of blockchain transaction`);
+      
       const mockNftId = `test-nft-${Date.now()}`;
       
       // Store a record in Firestore for consistency
@@ -148,7 +148,7 @@ export const mintModuleCompletionNFT = async (
           isTest: true
         });
       } catch (testDbError) {
-        console.error('Error storing test NFT record:', testDbError);
+        
       }
       
       return {
@@ -186,9 +186,9 @@ export const mintModuleCompletionNFT = async (
       };
     }
 
-    console.log(`Creating NFT minting transaction for direct wallet use`);
-    console.log(`Package ID: ${PACKAGE_ID}`);
-    console.log(`Module ID: ${moduleId}`);
+    
+    
+    
     
     // Create the transaction for the wallet to sign
     const transaction = createNFTMintingTransaction(recipientAddress, moduleId);
@@ -201,7 +201,7 @@ export const mintModuleCompletionNFT = async (
     };
     
   } catch (error) {
-    console.error('Error preparing NFT minting transaction:', error);
+    
     return { 
       success: false, 
       message: error instanceof Error ? error.message : 'Unknown error creating NFT minting transaction' 
@@ -250,10 +250,10 @@ export const recordSuccessfulMint = async (
     
     await addDoc(collection(db, 'user_nfts'), nftData);
     
-    console.log(`NFT mint recorded in Firestore for ${walletAddress}, module ${moduleId}`);
+    
     return true;
   } catch (error) {
-    console.error('Error recording successful mint:', error);
+    
     return false;
   }
 };
@@ -277,7 +277,7 @@ export const hasModuleNFT = async (walletAddress: string, moduleId: number): Pro
     
     return !nftsSnapshot.empty;
   } catch (error) {
-    console.error('Error checking if user has module NFT:', error);
+    
     return false;
   }
 };
@@ -301,7 +301,7 @@ export const getUserNFTs = async (walletAddress: string) => {
       ...doc.data()
     }));
   } catch (error) {
-    console.error('Error getting user NFTs:', error);
+    
     return [];
   }
 };

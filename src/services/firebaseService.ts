@@ -29,7 +29,7 @@ export const getUserData = async (userId: string): Promise<WalletUserData | null
     }
     return null;
   } catch (error) {
-    console.error("Error fetching user data:", error);
+    
     throw error;
   }
 };
@@ -74,7 +74,7 @@ export const updateUserXp = async (userId: string, xpToAdd: number): Promise<voi
       });
     }
   } catch (error) {
-    console.error("Error updating user XP:", error);
+    
     throw error;
   }
 };
@@ -125,7 +125,7 @@ export const updateUserStreak = async (userId: string): Promise<void> => {
       });
     }
   } catch (error) {
-    console.error("Error updating user streak:", error);
+    
     throw error;
   }
 };
@@ -141,7 +141,7 @@ export const getLeaderboard = async (limitCount = 10): Promise<Array<WalletUserD
       rank: index + 1
     }));
   } catch (error) {
-    console.error("Error fetching leaderboard:", error);
+    
     throw error;
   }
 };
@@ -175,7 +175,7 @@ export const saveUserProgress = async (
       });
     }
   } catch (error) {
-    console.error("Error saving user progress:", error);
+    
     throw error;
   }
 };
@@ -202,7 +202,7 @@ export const getUserProgress = async (
     const snapshot = await getDocs(progressQuery);
     return snapshot.docs.map(doc => doc.data());
   } catch (error) {
-    console.error("Error fetching user progress:", error);
+    
     throw error;
   }
 };
@@ -223,7 +223,7 @@ export const getUserByWalletAddress = async (
     
     return userData ? { walletAddress, ...userData } : null;
   } catch (error) {
-    console.error("Error getting user by wallet address:", error);
+    
     throw error;
   }
 };
@@ -238,7 +238,7 @@ export const uploadImage = async (
     await uploadBytes(storageRef, file);
     return await getDownloadURL(storageRef);
   } catch (error) {
-    console.error("Error uploading image:", error);
+    
     throw error;
   }
 }; 

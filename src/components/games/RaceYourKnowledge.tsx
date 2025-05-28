@@ -64,7 +64,7 @@ const RaceYourKnowledge: React.FC<RaceYourKnowledgeProps> = ({
         setQuestions(generatedQuestions);
         setLoading(false);
       } catch (error) {
-        console.error('Error generating questions:', error);
+        
         setErrorLoading(true);
         setLoading(false);
       }
@@ -180,7 +180,7 @@ const RaceYourKnowledge: React.FC<RaceYourKnowledgeProps> = ({
                   duration: 3000
                 });
               } catch (xpError) {
-                console.error('Error updating XP:', xpError);
+                
                 // Don't break the game flow, just log the error
                 toast({
                   title: "XP Update Failed",
@@ -234,7 +234,7 @@ const RaceYourKnowledge: React.FC<RaceYourKnowledgeProps> = ({
                   });
                 }
               } catch (error) {
-                console.error("Error awarding SUI tokens:", error);
+                
                 toast({
                   title: "Reward Error",
                   description: "There was a problem sending your SUI reward. Please try again.",
@@ -243,7 +243,7 @@ const RaceYourKnowledge: React.FC<RaceYourKnowledgeProps> = ({
               }
             }
           } catch (error) {
-            console.error('Error processing rewards:', error);
+            
           }
         }
       }
@@ -327,7 +327,7 @@ const RaceYourKnowledge: React.FC<RaceYourKnowledgeProps> = ({
         });
       }
     } catch (error) {
-      console.error('Error saving game results:', error);
+      
     }
   };
   

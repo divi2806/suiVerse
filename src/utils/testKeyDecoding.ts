@@ -12,15 +12,15 @@ export function testKeyDecoding() {
     
     // Log the public address to verify it matches the expected one
     const address = keypair.getPublicKey().toSuiAddress();
-    console.log('Successfully decoded private key');
-    console.log('Generated address:', address);
+    
+    
     
     return {
       success: true,
       address
     };
   } catch (error) {
-    console.error('Error decoding private key:', error);
+    
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -41,15 +41,15 @@ export function testFallbackMethod() {
     const keypair = Ed25519Keypair.fromSecretKey(fallbackKeyBytes);
     const address = keypair.getPublicKey().toSuiAddress();
     
-    console.log('Successfully created keypair from fallback key');
-    console.log('Fallback address:', address);
+    
+    
     
     return {
       success: true,
       address
     };
   } catch (error) {
-    console.error('Error with fallback method:', error);
+    
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'

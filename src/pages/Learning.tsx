@@ -148,7 +148,7 @@ const Learning = () => {
           setLoading(true);
         
         // Get modules and progress (empty wallet address will return mock data structure but we'll handle display differently)
-        console.log("Fetching user progress with wallet address:", walletAddress || 'none');
+        
         const galaxiesData = await getGalaxiesWithModules(walletAddress || '');
           
           // Format the galaxies data for the map
@@ -176,7 +176,7 @@ const Learning = () => {
           
         // Only process progress data if wallet is connected
         if (walletAddress) {
-          console.log("Processing real user progress data for wallet:", walletAddress);
+          
           
           // Get user progress to get the correct rocket position
           const userProgress = await getUserLearningProgress(walletAddress);
@@ -189,12 +189,12 @@ const Learning = () => {
             // Find the current module
             const currentModule = current.modules.find((m: ModuleType) => m.current);
             if (currentModule) {
-              console.log("Current module found:", currentModule.id);
+              
               setCurrentModuleId(currentModule.id);
               
               // Set rocket position - prioritize the one from userProgress if available
               if (userProgress && userProgress.rocketPosition) {
-                console.log("Using rocket position from user progress:", userProgress.rocketPosition);
+                
                 setRocketPosition(userProgress.rocketPosition);
               } else {
                 const rocketX = current.position.x + (currentModule.position?.x || 0);
@@ -229,7 +229,7 @@ const Learning = () => {
           setRocketPosition({ x: 300, y: 150 }); // Default position
         }
         } catch (error) {
-        console.error('Error fetching user progress:', error);
+        
         toast({
           title: "Error",
           description: "Failed to load learning progress",
@@ -261,7 +261,7 @@ const Learning = () => {
         
         setDailyChallenges(challenges);
       } catch (error) {
-        console.error('Error fetching daily challenges:', error);
+        
         // Leave challenges empty for error cases
         setDailyChallenges([]);
       } finally {
@@ -338,7 +338,7 @@ const Learning = () => {
   const handleStartChallenge = async (challengeId: string) => {
     // This function is now handled by DailyChallenges component directly
     // It's only needed for backwards compatibility
-    console.log("Legacy challenge start handler called for challenge:", challengeId);
+    
   };
   
   const handleClaimReward = async (challengeId: string) => {
@@ -366,7 +366,7 @@ const Learning = () => {
         throw new Error("Failed to claim reward");
       }
     } catch (error) {
-      console.error('Error claiming reward:', error);
+      
       toast({
         title: "Error",
         description: "Failed to claim rewards. Please try again.",
@@ -443,7 +443,7 @@ const Learning = () => {
       // Get module info
       const module = galaxies.find(g => g.id === currentGalaxy)?.modules.find(m => m.id === moduleId);
       if (!module) {
-        console.error("Module not found:", moduleId);
+        
         return;
       }
       
@@ -452,7 +452,7 @@ const Learning = () => {
       const userDoc = await getDoc(userRef);
       
       if (!userDoc.exists()) {
-        console.error("User document not found");
+        
         return;
       }
       
@@ -475,9 +475,9 @@ const Learning = () => {
         );
         
         if (tokenResult.success) {
-          console.log(`Awarded ${module.tokenReward} SUI for completing module ${moduleId}`);
+          
         } else {
-          console.error("Failed to send token reward:", tokenResult.message);
+          
         }
       }
       
@@ -517,7 +517,7 @@ const Learning = () => {
       });
       
     } catch (error) {
-      console.error("Error completing module:", error);
+      
       toast({
         title: "Error",
         description: "There was a problem completing the module. Please try again.",
@@ -573,7 +573,7 @@ const Learning = () => {
       
       return newAchievements;
     } catch (error) {
-      console.error('Error checking achievements:', error);
+      
       return [];
     }
   };
@@ -594,7 +594,7 @@ const Learning = () => {
         if (userProgress) {
           // Update rocket position directly from user progress
           if (userProgress.rocketPosition) {
-            console.log("Refresh: Updated rocket position to:", userProgress.rocketPosition);
+            
             setRocketPosition(userProgress.rocketPosition);
           }
           
@@ -650,7 +650,7 @@ const Learning = () => {
         }
       }
     } catch (error) {
-      console.error("Error refreshing progress data:", error);
+      
       toast({
         title: "Error",
         description: "Failed to refresh progress data",
@@ -746,7 +746,7 @@ const Learning = () => {
         refreshProgressData();
       }, 2000);
     } catch (err) {
-      console.error("Module completion error:", err);
+      
       toast({
         title: "Error",
         description: "Failed to complete module",
@@ -1037,7 +1037,7 @@ const Learning = () => {
                                         // Make sure we have a valid number
                                         return `${!isNaN(xp) ? xp : 0} XP potential`;
                                       } catch (error) {
-                                        console.error("Error calculating XP potential:", error);
+                                        
                                         return "0 XP potential";
                                       }
                                     })()}
@@ -1144,7 +1144,7 @@ const Learning = () => {
                   // Refresh to see changes
                   refreshProgressData();
                 } catch (err) {
-                  console.error("Repair error:", err);
+                  
                   toast({
                     title: "Error",
                     description: "Failed to repair completedModules",
@@ -1208,7 +1208,7 @@ const Learning = () => {
                     duration: 4000,
                   });
                 } catch (err) {
-                  console.error("Check error:", err);
+                  
                   toast({
                     title: "Error",
                     description: "Failed to check module status",
@@ -1252,7 +1252,7 @@ const Learning = () => {
                         moduleIdNum = parseInt(match[1], 10);
                       }
                     } catch (e) {
-                      console.error(`Error parsing moduleId: ${moduleId}`, e);
+                      
                     }
                   }
                   
@@ -1285,7 +1285,7 @@ const Learning = () => {
                   // Refresh to see changes
                   refreshProgressData();
                 } catch (err) {
-                  console.error("Rocket update error:", err);
+                  
                   toast({
                     title: "Error",
                     description: "Failed to update rocket position",
@@ -1350,7 +1350,7 @@ const Learning = () => {
                   // Call our helper function that directly updates the database
                   await forceCompleteModule(currentMod, nextModId);
                 } catch (err) {
-                  console.error("Module completion error:", err);
+                  
                   toast({
                     title: "Error",
                     description: "Failed to complete module",

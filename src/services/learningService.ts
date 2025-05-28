@@ -71,7 +71,7 @@ export const getUserLearningProgress = async (walletAddress: string): Promise<Le
     
     return progressDoc.data() as LearningProgress;
   } catch (error) {
-    console.error('Error getting user learning progress:', error);
+    
     throw error;
   }
 };
@@ -102,7 +102,7 @@ export const updateCurrentModule = async (walletAddress: string, moduleId: strin
     });
     
   } catch (error) {
-    console.error('Error updating current module:', error);
+    
     throw error;
   }
 };
@@ -145,7 +145,7 @@ export const ensureLearningProgressInitialized = async (walletAddress: string, m
     }
     
   } catch (error) {
-    console.error('Error ensuring learning progress is initialized:', error);
+    
     throw error;
   }
 };
@@ -184,7 +184,7 @@ export const completeLesson = async (
     // Return the XP that will be earned on module completion
     return XP_REWARDS.COMPLETE_FLASHCARD;
   } catch (error) {
-    console.error('Error completing lesson:', error);
+    
     throw error;
   }
 };
@@ -236,7 +236,7 @@ export const completeQuiz = async (
     // Return the XP that will be earned on module completion
     return quizXP;
   } catch (error) {
-    console.error('Error completing quiz:', error);
+    
     throw error;
   }
 };
@@ -281,7 +281,7 @@ export const completeAlienChallenge = async (
     // Return the XP that will be earned on module completion
     return XP_REWARDS.DEFEAT_ALIEN;
   } catch (error) {
-    console.error('Error completing alien challenge:', error);
+    
     throw error;
   }
 };
@@ -291,14 +291,14 @@ export const completeAlienChallenge = async (
  */
 export const repairCompletedModules = async (walletAddress: string): Promise<boolean> => {
   try {
-    console.log(`Attempting to repair completedModules for user ${walletAddress}`);
+    
     
     // Get main progress document
     const userProgressRef = doc(db, 'learningProgress', walletAddress);
     const progressDoc = await getDoc(userProgressRef);
     
     if (!progressDoc.exists()) {
-      console.log(`No learning progress found for user ${walletAddress}`);
+      
       return false;
     }
     
@@ -306,7 +306,7 @@ export const repairCompletedModules = async (walletAddress: string): Promise<boo
     
     // If completedModules is undefined, fix it
     if (!userData.completedModules) {
-      console.log(`Repairing missing completedModules array for user ${walletAddress}`);
+      
       
       // Get all module progress subcollection documents
       const moduleProgressCollection = collection(userProgressRef, 'moduleProgress');
@@ -318,7 +318,7 @@ export const repairCompletedModules = async (walletAddress: string): Promise<boo
         const moduleData = doc.data();
         if (moduleData.completed) {
           completedModules.push(doc.id);
-          console.log(`Found completed module: ${doc.id}`);
+          
         }
       });
       
@@ -327,13 +327,13 @@ export const repairCompletedModules = async (walletAddress: string): Promise<boo
         completedModules: completedModules
       });
       
-      console.log(`Repair successful. Added ${completedModules.length} modules to completedModules array`);
+      
       return true;
     }
     
     return false;
   } catch (error) {
-    console.error(`Error repairing completedModules:`, error);
+    
     return false;
   }
 };
@@ -353,7 +353,7 @@ export const completeModule = async (
   newLevel?: number;
 }> => {
   try {
-    console.log(`Starting module completion process for user ${walletAddress}, module ${moduleId}, next module ${nextModuleId}`);
+    
     
     // First ensure the learning progress documents are initialized
     await ensureLearningProgressInitialized(walletAddress, moduleId);
@@ -373,7 +373,7 @@ export const completeModule = async (
     
     // Check if module is already completed
     if (moduleProgressData.completed) {
-      console.log(`Module ${moduleId} already completed for user ${walletAddress}, skipping rewards`);
+      
       return {
         xpEarned: 0,
         suiEarned: 0,
@@ -398,7 +398,7 @@ export const completeModule = async (
     // Calculate total XP earned in this module
     const totalModuleXp = Math.floor(flashcardsXp + quizXp + alienXp + moduleCompletionXp);
     
-    console.log(`Calculated XP: flashcards=${flashcardsXp}, quiz=${quizXp}, alien=${alienXp}, completion=${moduleCompletionXp}, total=${totalModuleXp}`);
+    
     
     // Mark module as completed in the moduleProgress subcollection
     try {
@@ -406,9 +406,9 @@ export const completeModule = async (
         completed: true,
         completedAt: serverTimestamp()
       });
-      console.log(`Marked module ${moduleId} as completed in moduleProgress subcollection`);
+      
     } catch (updateError) {
-      console.error(`Error marking module ${moduleId} as completed:`, updateError);
+      
       // Try to recover by setting the document if update failed
       try {
         await setDoc(moduleProgressRef, {
@@ -416,9 +416,9 @@ export const completeModule = async (
           completed: true,
           completedAt: serverTimestamp()
         });
-        console.log(`Recovered by setting module ${moduleId} as completed`);
+        
       } catch (setError) {
-        console.error(`Recovery failed for module ${moduleId}:`, setError);
+        
         throw new Error(`Failed to mark module as completed: ${setError}`);
       }
     }
@@ -433,7 +433,7 @@ export const completeModule = async (
     const newTotalXp = currentXp + totalModuleXp;
     const newLevel = calculateLevel(newTotalXp);
     const leveledUp = newLevel > currentLevel;
-    console.log(`Current XP=${currentXp}, new total=${newTotalXp}, level change: ${currentLevel} -> ${newLevel}`);
+    
     
     // Calculate how many levels were gained (for multi-level jumps)
     const levelsGained = newLevel - currentLevel;
@@ -453,7 +453,7 @@ export const completeModule = async (
           moduleIdNum = parseInt(match[1], 10);
         }
       } catch (e) {
-        console.error(`Error parsing moduleId: ${moduleId}`, e);
+        
       }
     }
     
@@ -463,7 +463,7 @@ export const completeModule = async (
       y: 150 + (moduleIdNum * 15)
     };
     
-    console.log(`Updating rocket position to:`, updatedRocketPosition);
+    
     
     // Check if completedModules exists, if not create it
     const currentCompletedModules = userData.completedModules || [];
@@ -479,7 +479,7 @@ export const completeModule = async (
     
     // First, ensure the next module ID is valid
     if (!nextModuleId) {
-      console.warn("Next module ID is empty, using default");
+      
       // Set a default next module based on the current module
       if (moduleId === 'intro-to-sui') {
         nextModuleId = 'module-2';
@@ -493,11 +493,11 @@ export const completeModule = async (
             nextModuleId = 'intro-to-sui'; // Fallback
           }
         } catch (e) {
-          console.error(`Error parsing moduleId for next module: ${moduleId}`, e);
+          
           nextModuleId = 'intro-to-sui'; // Fallback
         }
       }
-      console.log(`Set default next module ID to ${nextModuleId}`);
+      
     }
     
     // Update main progress document - first try with arrayUnion
@@ -514,9 +514,9 @@ export const completeModule = async (
       };
       
       await updateDoc(userProgressRef, updateData);
-      console.log(`Updated main progress document with arrayUnion: XP=${newTotalXp}, level=${newLevel}, currentModule=${nextModuleId}`);
+      
     } catch (updateError) {
-      console.error(`Error updating main progress with arrayUnion:`, updateError);
+      
       
       // Try again with direct set of completedModules
       try {
@@ -531,9 +531,9 @@ export const completeModule = async (
         };
         
         await updateDoc(userProgressRef, updateData);
-        console.log(`Updated main progress document with direct set: XP=${newTotalXp}, level=${newLevel}, currentModule=${nextModuleId}`);
+        
       } catch (directUpdateError) {
-        console.error(`Error with direct update of main progress:`, directUpdateError);
+        
         
         // Critical error, try one more time with a delay and setDoc instead of updateDoc
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -552,9 +552,9 @@ export const completeModule = async (
             rocketPosition: updatedRocketPosition,
             lastUpdated: serverTimestamp()
           });
-          console.log(`Final recovery successful using setDoc`);
+          
         } catch (retryError) {
-          console.error(`All attempts failed for updating main progress:`, retryError);
+          
           // Continue with the function but log the error
         }
       }
@@ -570,9 +570,9 @@ export const completeModule = async (
       await updateDoc(userProgressRef, {
         suiTokens: increment(suiEarned)
       });
-      console.log(`Added ${suiEarned} SUI tokens to user wallet`);
+      
     } catch (suiUpdateError) {
-      console.error(`Error updating SUI tokens:`, suiUpdateError);
+      
     }
     
     // Small chance (10%) to earn a mystery box
@@ -580,9 +580,9 @@ export const completeModule = async (
     if (mysteryBoxAwarded) {
       try {
         await awardMysteryBox(walletAddress, 'common', 'module_completion');
-        console.log(`Awarded mystery box to user`);
+        
       } catch (mysteryBoxError) {
-        console.error(`Error awarding mystery box:`, mysteryBoxError);
+        
       }
     }
     
@@ -596,9 +596,9 @@ export const completeModule = async (
         xpEarned: totalModuleXp,
         timestamp: serverTimestamp()
       });
-      console.log(`Added module completion activity to activity log`);
+      
     } catch (activityError) {
-      console.error(`Error recording activity:`, activityError);
+      
     }
     
     // If leveled up, record that achievement
@@ -613,9 +613,9 @@ export const completeModule = async (
             description: `You reached level ${achievedLevel}!`,
             timestamp: serverTimestamp()
           });
-          console.log(`Added level up activity for level ${achievedLevel}`);
+          
         } catch (levelUpError) {
-          console.error(`Error recording level up activity:`, levelUpError);
+          
         }
       }
     }
@@ -631,7 +631,7 @@ export const completeModule = async (
         numericModuleId = 1;
       }
     } catch (error) {
-      console.error("Error parsing module ID:", error);
+      
     }
     
     // Get the module name
@@ -640,7 +640,7 @@ export const completeModule = async (
     // Show the module completion popup with NFT option
     // @ts-ignore - This is defined globally in App.tsx
     if (window.showModuleCompletionPopup) {
-      console.log(`Showing module completion popup for module ${moduleId} (numeric ID: ${numericModuleId})`);
+      
       try {
         window.showModuleCompletionPopup({
           moduleId: numericModuleId,
@@ -649,12 +649,12 @@ export const completeModule = async (
           xpEarned: totalModuleXp,
           suiEarned
         });
-        console.log(`Module completion popup function called successfully`);
+        
       } catch (popupError) {
-        console.error(`Error calling showModuleCompletionPopup:`, popupError);
+        
         
         // Try alternative method to call the function
-        console.log(`Attempting alternative popup method...`);
+        
         try {
           const win = window as any;
           if (typeof win.showModuleCompletionPopup === 'function') {
@@ -665,9 +665,9 @@ export const completeModule = async (
               xpEarned: totalModuleXp,
               suiEarned
             });
-            console.log(`Alternative popup method succeeded`);
+            
           } else {
-            console.error('showModuleCompletionPopup is not a function on the "any" window object');
+            
             
             // Last resort: try to directly create a custom event to trigger the popup
             const moduleCompletionEvent = new CustomEvent('moduleCompleted', {
@@ -680,20 +680,20 @@ export const completeModule = async (
               }
             });
             document.dispatchEvent(moduleCompletionEvent);
-            console.log(`Dispatched moduleCompleted custom event as last resort`);
+            
           }
         } catch (altError) {
-          console.error(`Alternative popup method also failed:`, altError);
+          
         }
       }
     } else {
-      console.error('showModuleCompletionPopup function not found on window object');
-      console.log('window object keys:', Object.keys(window));
+      
+      
       
       // Try on "any" typed window as a fallback
       const win = window as any;
       if (typeof win.showModuleCompletionPopup === 'function') {
-        console.log(`Found function on "any" window, attempting to call...`);
+        
         win.showModuleCompletionPopup({
           moduleId: numericModuleId,
           moduleName,
@@ -702,7 +702,7 @@ export const completeModule = async (
           suiEarned
         });
       } else {
-        console.error('Function not found on "any" window either');
+        
         
         // Dispatch a custom event as a fallback
         const moduleCompletionEvent = new CustomEvent('moduleCompleted', {
@@ -715,7 +715,7 @@ export const completeModule = async (
           }
         });
         document.dispatchEvent(moduleCompletionEvent);
-        console.log(`Dispatched moduleCompleted custom event as fallback`);
+        
       }
     }
     
@@ -723,7 +723,7 @@ export const completeModule = async (
     try {
       const win = window as any;
       if (typeof win.showDirectModuleCompletionPopup === 'function') {
-        console.log(`Found direct popup function, calling it...`);
+        
         win.showDirectModuleCompletionPopup({
           moduleId: numericModuleId,
           moduleName,
@@ -733,10 +733,10 @@ export const completeModule = async (
         });
       }
     } catch (directError) {
-      console.error(`Direct popup method failed:`, directError);
+      
     }
     
-    console.log(`Module completion process finished successfully`);
+    
     return {
       xpEarned: totalModuleXp,
       suiEarned,
@@ -745,7 +745,7 @@ export const completeModule = async (
       newLevel: leveledUp ? newLevel : undefined
     };
   } catch (error) {
-    console.error('Critical error completing module:', error);
+    
     // Try to push a minimal update to at least mark the module as completed
     try {
       const userProgressRef = doc(db, 'learningProgress', walletAddress);
@@ -761,9 +761,9 @@ export const completeModule = async (
         currentModuleId: nextModuleId
       });
       
-      console.log(`Minimal recovery successful: Module marked as completed`);
+      
     } catch (recoveryError) {
-      console.error('Recovery attempt failed:', recoveryError);
+      
     }
     
     throw error;
@@ -859,7 +859,7 @@ export const calculateLevel = (totalXp: number): number => {
 export const getModuleXpPotential = (moduleId: string): number => {
   // Input validation
   if (!moduleId) {
-    console.warn("Called getModuleXpPotential with empty moduleId");
+    
     return 0; // Return 0 for invalid input
   }
   
@@ -885,7 +885,7 @@ export const getModuleXpPotential = (moduleId: string): number => {
       }
     }
   } catch (e) {
-    console.error("Error parsing module number from ID:", moduleId);
+    
   }
   
   // More advanced modules have more challenges
@@ -936,7 +936,7 @@ export const completeGalaxy = async (
     
     return XP_REWARDS.COMPLETE_GALAXY;
   } catch (error) {
-    console.error('Error completing galaxy:', error);
+    
     throw error;
   }
 };
@@ -963,7 +963,7 @@ export const addLearningActivity = async (walletAddress: string, activity: any):
       createdAt: serverTimestamp()
     });
   } catch (error) {
-    console.error('Error adding learning activity:', error);
+    
     // Don't throw the error, as this is a non-critical function
     // We don't want to break the main learning flow if activity recording fails
   }
@@ -1019,7 +1019,7 @@ export const unlockAchievement = async (
     
     return true;
   } catch (error) {
-    console.error('Error unlocking achievement:', error);
+    
     throw error;
   }
 };
@@ -1076,7 +1076,7 @@ function getAchievementType(id: string): string {
 export const getGalaxiesWithModules = async (walletAddress: string) => {
   try {
     if (!walletAddress) {
-      console.warn('No wallet address provided, using mock data');
+      
       return getMockGalaxiesWithModules();
     }
     
@@ -1088,7 +1088,7 @@ export const getGalaxiesWithModules = async (walletAddress: string) => {
     const progressDoc = await getDoc(userProgressRef);
     
     if (!progressDoc.exists()) {
-      console.warn('User progress not found, using mock data');
+      
       return getMockGalaxiesWithModules();
     }
     
@@ -1164,7 +1164,7 @@ export const getGalaxiesWithModules = async (walletAddress: string) => {
     
     return galaxiesWithProgress;
   } catch (error) {
-    console.error('Error getting galaxies with modules:', error);
+    
     return getMockGalaxiesWithModules();
   }
 };
@@ -1569,7 +1569,7 @@ export const awardSuiTokens = async (
     
     return true;
   } catch (error) {
-    console.error('Error awarding SUI tokens:', error);
+    
     return false;
   }
 };
@@ -1622,7 +1622,7 @@ export const awardMysteryBox = async (
       
       return true;
   } catch (error) {
-    console.error('Error awarding mystery box:', error);
+    
     // Don't break main flow if mystery box awarding fails
     return false;
   }
@@ -1706,14 +1706,14 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
       lastLogin = new Date(0); // Very old date
     }
     
-    console.log('Last login timestamp:', lastLogin);
+    
     
     // Get the date part only (strip time) for day comparison
     const lastLoginDate = new Date(lastLogin.getFullYear(), lastLogin.getMonth(), lastLogin.getDate()).getTime();
     
     // Also calculate hours since last login for the 24hr check
     const hoursSinceLastLogin = (now.getTime() - lastLogin.getTime()) / (1000 * 60 * 60);
-    console.log('Hours since last login:', hoursSinceLastLogin);
+    
     
     // Check if it's a new day AND more than 24 hours have passed since last login
     // Either different calendar day OR more than 24 hours
@@ -1724,7 +1724,7 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
     const isStreakDay = isDifferentDay || isMoreThan24Hours;
     
     if (isStreakDay) {
-      console.log('New streak day detected - different day:', isDifferentDay, 'more than 24h:', isMoreThan24Hours);
+      
       
       const currentStreak = userData.streak || 0;
       let newStreak = currentStreak;
@@ -1745,20 +1745,20 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
         // Continue streak
         newStreak += 1;
         xpAwarded = XP_REWARDS.DAILY_STREAK;
-        console.log('Continuing streak to day:', newStreak);
+        
         
         // Bonus for every 7 days
         if (newStreak % 7 === 0) {
           xpAwarded += XP_REWARDS.STREAK_MILESTONE;
           isMilestone = true;
-          console.log('Milestone reached!', newStreak, 'days');
+          
           
           // Also award a mystery box every 7 days
           await awardMysteryBox(walletAddress, 'rare', 'streak-milestone');
         }
       } else {
         // Streak broken - reset to 1 for today
-        console.log('Streak broken - last login too old. Resetting to 1.');
+        
         newStreak = 1;
         xpAwarded = XP_REWARDS.DAILY_STREAK; // Still award XP for the new day
       }
@@ -1770,7 +1770,7 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
       const newLevel = calculateLevel(newTotalXp);
       const leveledUp = newLevel > currentLevel;
       
-      console.log('Updating user data with new streak:', newStreak);
+      
       
       // Update user streak and login date
       await updateDoc(userRef, {
@@ -1825,7 +1825,7 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
     const currentStreak = userData.streak || 0;
     const isMilestone = currentStreak > 0 && currentStreak % 7 === 0;
     
-    console.log('Not a new streak day - updating login time only');
+    
     
     // Just update login time
     await updateDoc(userRef, {
@@ -1842,7 +1842,7 @@ export const checkDailyStreak = async (walletAddress: string): Promise<{
       newLevel: undefined
     };
   } catch (error) {
-    console.error('Error checking daily streak:', error);
+    
     return {
       isNewDay: false,
       currentStreak: 0,
@@ -1882,7 +1882,7 @@ export const restoreStreak = async (walletAddress: string): Promise<boolean> => 
     
     return true;
   } catch (error) {
-    console.error('Error restoring streak:', error);
+    
     return false;
   }
 };
@@ -1892,14 +1892,14 @@ export const restoreStreak = async (walletAddress: string): Promise<boolean> => 
  */
 export const isModuleCompleted = async (walletAddress: string, moduleId: string): Promise<boolean> => {
   try {
-    console.log(`Checking if module ${moduleId} is completed for user ${walletAddress}`);
+    
     
     // Get main progress document
     const userProgressRef = doc(db, 'learningProgress', walletAddress);
     const progressDoc = await getDoc(userProgressRef);
     
     if (!progressDoc.exists()) {
-      console.log(`No learning progress found for user ${walletAddress}`);
+      
       return false;
     }
     
@@ -1918,13 +1918,13 @@ export const isModuleCompleted = async (walletAddress: string, moduleId: string)
       moduleProgressDoc.data().completed === true;
     
     const result = isInCompletedArray || isMarkedCompleted;
-    console.log(`Module ${moduleId} completion status: ${result ? 'COMPLETED' : 'NOT COMPLETED'}`);
-    console.log(`- In completedModules array: ${isInCompletedArray}`);
-    console.log(`- Marked completed in subcollection: ${isMarkedCompleted}`);
+    
+    
+    
     
     return result;
   } catch (error) {
-    console.error(`Error checking module completion:`, error);
+    
     return false;
   }
 };

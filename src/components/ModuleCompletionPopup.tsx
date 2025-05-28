@@ -56,31 +56,31 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
   // Mint NFT automatically when popup opens
   useEffect(() => {
     if (isOpen && activeWalletAddress) {
-      console.log(`Auto-minting NFT check: isOpen=${isOpen}, walletAddress=${activeWalletAddress}, isMinting=${isMinting}, mintingSuccess=${mintingSuccess}, mintingError=${mintingError ? 'true' : 'false'}`);
+      
       
       // Always force a retry for test-wallet addresses or when address contains "test"
       const isTestWallet = activeWalletAddress === 'test-wallet' || activeWalletAddress.toLowerCase().includes('test');
       if (isTestWallet) {
-        console.log(`Test wallet detected, forcing NFT minting regardless of state`);
+        
         setIsMinting(false);
         setMintingSuccess(false);
         setMintingError(null);
         // Give a small delay to ensure state is updated
         setTimeout(() => {
-          console.log('Forcing NFT minting for test wallet...');
+          
           mintNFT();
         }, 100);
         return;
       }
       
       if (!isMinting && !mintingSuccess && !mintingError) {
-        console.log(`Auto-minting NFT for module ${moduleId} to ${activeWalletAddress}`);
+        
         mintNFT();
       } else {
-        console.log(`Not auto-minting due to minting state: isMinting=${isMinting}, mintingSuccess=${mintingSuccess}, mintingError=${mintingError ? 'true' : 'false'}`);
+        
       }
     } else {
-      console.log(`Not auto-minting, conditions not met: isOpen=${isOpen}, walletAddress=${activeWalletAddress || 'undefined'}`);
+      
     }
   }, [isOpen, activeWalletAddress]);
 
@@ -90,12 +90,12 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
       setIsMinting(true);
       setMintingError(null);
 
-      console.log(`Starting NFT minting process for module ${moduleId}`);
-      console.log(`WalletAddress: "${activeWalletAddress}", moduleId: ${moduleId}, wallet connected: ${isWalletConnected}`);
+      
+      
       
       // Extra validation for wallet address
       if (!activeWalletAddress || activeWalletAddress === 'undefined' || activeWalletAddress === 'null') {
-        console.error('Invalid wallet address detected:', activeWalletAddress);
+        
         setMintingError('Invalid wallet address');
         setIsMinting(false);
         return;
@@ -106,7 +106,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
       
       // If wallet isn't connected and NOT a test wallet, show error
       if (!isWalletConnected && !isTestWallet) {
-        console.error('Wallet not connected');
+        
         setMintingError('Wallet not connected. Please connect your wallet first.');
         setIsMinting(false);
         return;
@@ -114,7 +114,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
       
       // Special handling for test wallet
       if (isTestWallet) {
-        console.log('Test wallet detected, simulating successful mint');
+        
         // Simulate successful minting
         setTimeout(() => {
           setMintingSuccess(true);
@@ -135,7 +135,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
       const result = await mintModuleCompletionNFT(activeWalletAddress, moduleId);
       
       if (result.success && result.transaction) {
-        console.log('Transaction created, requesting wallet signature...');
+        
         
         try {
           // We need to convert the TransactionBlock to the format expected by @mysten/dapp-kit
@@ -154,7 +154,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
             transaction: btoa(String.fromCharCode(...new Uint8Array(builtTx)))
           });
           
-          console.log('Transaction executed successfully:', response);
+          
           
           // Get transaction digest
           const txDigest = response.digest;
@@ -179,18 +179,18 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
             origin: { x: 0.5, y: 0.5 }
           });
         } catch (walletError) {
-          console.error('Error during wallet signing:', walletError);
+          
           setMintingError(walletError instanceof Error ? 
             `Wallet error: ${walletError.message}` : 
             'Error during wallet transaction'
           );
         }
       } else {
-        console.error(`Failed to create minting transaction: ${result.message}`);
+        
         setMintingError(result.message || 'Failed to create minting transaction');
       }
     } catch (error) {
-      console.error('Error minting NFT:', error);
+      
       setMintingError(error instanceof Error ? error.message : 'An unexpected error occurred');
     } finally {
       setIsMinting(false);
@@ -217,7 +217,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
   // Trigger confetti when popup opens
   useEffect(() => {
     if (isOpen) {
-      console.log('Module completion popup opened, triggering confetti');
+      
       confetti({
         particleCount: 200,
         spread: 90,
@@ -230,7 +230,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
   useEffect(() => {
     const win = window as any;
     win.showDirectModuleCompletionPopup = (data: any) => {
-      console.log('Direct popup function called with:', data);
+      
       
       // Extract data or use defaults
       const popupData = {
@@ -248,7 +248,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
       
       // Use setTimeout to ensure this runs after current execution cycle
       setTimeout(() => {
-        console.log('Forcing popup to open with data:', popupData);
+        
         // This line will directly open the popup without relying on other components
         document.dispatchEvent(new CustomEvent('forceModulePopup', { detail: popupData }));
       }, 10);
@@ -365,7 +365,7 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
                 setIsMinting(false);
                 setMintingSuccess(false);
                 setMintingError(null);
-                console.log('Force minting NFT initiated...');
+                
                 setTimeout(() => mintNFT(), 50);
               }}
               className="w-full mt-2 bg-yellow-600 hover:bg-yellow-700 text-white"

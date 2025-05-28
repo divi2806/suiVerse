@@ -103,7 +103,7 @@ const App = () => {
 
   // Make the showModuleCompletionPopup function available globally
   useEffect(() => {
-    console.log('Setting up showModuleCompletionPopup globally');
+    
     // @ts-ignore
     window.showModuleCompletionPopup = showModuleCompletionPopup;
     
@@ -113,7 +113,7 @@ const App = () => {
 
     // Debug: Add a test function
     const testPopup = () => {
-      console.log('Test popup function called');
+      
       showModuleCompletionPopup({
         moduleId: 1,
         moduleName: 'Test Module',
@@ -125,7 +125,7 @@ const App = () => {
     win.testModulePopup = testPopup;
     
     return () => {
-      console.log('Cleaning up showModuleCompletionPopup');
+      
       // @ts-ignore
       delete window.showModuleCompletionPopup;
       delete win.showModuleCompletionPopup;
@@ -136,7 +136,7 @@ const App = () => {
   // Add event listener for moduleCompleted custom event
   useEffect(() => {
     const handleModuleCompleted = (event: CustomEvent) => {
-      console.log('Module completed event received:', event.detail);
+      
       showModuleCompletionPopup(event.detail);
     };
     
@@ -150,7 +150,7 @@ const App = () => {
   // Add event listener for forceModulePopup custom event
   useEffect(() => {
     const handleForcePopup = (event: CustomEvent) => {
-      console.log('Force module popup event received:', event.detail);
+      
       setModuleCompletionData({
         isOpen: true,
         ...event.detail

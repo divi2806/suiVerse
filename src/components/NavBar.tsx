@@ -91,7 +91,7 @@ const UserProfileDropdown = memo(({
   handleConnect: (address: string) => void,
   handleDisconnect: () => void
 }) => {
-  console.log('UserProfileDropdown rendering with avatarSrc:', avatarSrc);
+  
   
   return (
     <DropdownMenu>
@@ -192,8 +192,8 @@ const NavBar = memo<NavBarProps>(({
       avatarSrc: finalAvatarSrc
     };
     
-    console.log('NavBar userData:', userData);
-    console.log('NavBar using consistent avatarSrc:', finalAvatarSrc);
+    
+    
     
     return stats;
   }, [userData, userXp, userStreak, userLevel, username, avatarSrc]);

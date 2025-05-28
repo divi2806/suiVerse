@@ -1,4 +1,5 @@
-import { ChallengeType, DailyChallenge } from './dailyChallengesService';
+import { ChallengeType } from './challengeTypes';
+import { DailyChallenge } from './dailyChallengesService';
 
 // Hardcoded code puzzle challenges
 export const codePuzzleChallenges: any[] = [
@@ -117,81 +118,40 @@ export const quizChallenges: any[] = [
   }
 ];
 
-// Hardcoded bug hunt challenges
-export const bugHuntChallenges: any[] = [
+// Convert bug hunt challenges to quiz format
+export const bugHuntQuizzes: any[] = [
   {
-    scenario: "This code is supposed to create and transfer an NFT",
-    buggyCode: `module example::buggy_nft {
-  use sui::transfer;
-  use sui::object::{Self, UID};
-  use sui::tx_context::{Self, TxContext};
-
-  struct NFT has key {
-    id: UID,
-    name: string,
-    description: string,
-  }
-
-  public fun create_nft(name: string, description: string, ctx: &mut TxContext): NFT {
-    let nft = NFT {
-      id: object::new(ctx),
-      name,
-      description,
-    };
-    nft
-  }
-
-  public fun transfer_nft(nft: NFT, recipient: address) {
-    transfer::transfer(nft, recipient)
-  }
-}`,
-    bugs: [
-      {
-        lineHint: "In the struct definition",
-        description: "The NFT struct is missing the 'store' ability, which is needed for transfers",
-        fix: "Change 'struct NFT has key {' to 'struct NFT has key, store {'"
-      },
-      {
-        lineHint: "In the struct fields",
-        description: "The string type is used but not imported",
-        fix: "Add 'use std::string::String;' and change 'string' to 'String'"
-      }
-    ]
+    question: "What are the bugs in this NFT code?\n```move\nmodule example::buggy_nft {\n  use sui::transfer;\n  use sui::object::{Self, UID};\n  use sui::tx_context::{Self, TxContext};\n\n  struct NFT has key {\n    id: UID,\n    name: string,\n    description: string,\n  }\n\n  public fun create_nft(name: string, description: string, ctx: &mut TxContext): NFT {\n    let nft = NFT {\n      id: object::new(ctx),\n      name,\n      description,\n    };\n    nft\n  }\n\n  public fun transfer_nft(nft: NFT, recipient: address) {\n    transfer::transfer(nft, recipient)\n  }\n}\n```",
+    options: [
+      "The string type is used but not imported, and the NFT struct is missing the 'store' ability",
+      "The NFT struct should use 'drop' instead of 'key' ability",
+      "The create_nft function should return the NFT by reference, not by value",
+      "The transfer_nft function should use 'transfer::public_transfer' instead of 'transfer::transfer'"
+    ],
+    correctAnswer: 0,
+    explanation: "There are two bugs: (1) The NFT struct is missing the 'store' ability, which is needed for transfers. It should be 'struct NFT has key, store {'. (2) The string type is used but not imported. It should add 'use std::string::String;' and change 'string' to 'String'."
   },
   {
-    scenario: "This code is supposed to implement a simple counter",
-    buggyCode: `module example::counter {
-  use sui::object::{Self, UID};
-  use sui::tx_context::{Self, TxContext};
-  
-  struct Counter has key {
-    id: UID,
-    value: u64
-  }
-  
-  public fun create(ctx: &mut TxContext): Counter {
-    Counter {
-      id: object::new(ctx),
-      count: 0
-    }
-  }
-  
-  public fun increment(counter: &mut Counter) {
-    counter.value = counter.value + 1;
-  }
-}`,
-    bugs: [
-      {
-        lineHint: "In the create function",
-        description: "The field name is incorrect",
-        fix: "Change 'count: 0' to 'value: 0'"
-      },
-      {
-        lineHint: "Missing transfer functionality",
-        description: "There's no way to transfer the counter",
-        fix: "Add transfer module import and a transfer function"
-      }
-    ]
+    question: "Find the bugs in this counter code:\n```move\nmodule example::counter {\n  use sui::object::{Self, UID};\n  use sui::tx_context::{Self, TxContext};\n  \n  struct Counter has key {\n    id: UID,\n    value: u64\n  }\n  \n  public fun create(ctx: &mut TxContext): Counter {\n    Counter {\n      id: object::new(ctx),\n      count: 0\n    }\n  }\n  \n  public fun increment(counter: &mut Counter) {\n    counter.value = counter.value + 1;\n  }\n}\n```",
+    options: [
+      "The field name 'count' in the create function should be 'value' to match the struct definition",
+      "The counter struct is missing the 'store' ability and there's no way to transfer it",
+      "Both of the above",
+      "The increment function should return a new counter instead of modifying the existing one"
+    ],
+    correctAnswer: 2,
+    explanation: "There are two issues: (1) The field name is incorrect - 'count: 0' should be 'value: 0' to match the struct definition. (2) The counter struct is missing the 'store' ability, and there's no transfer functionality, so the counter can't be transferred between addresses."
+  },
+  {
+    question: "What's wrong with this shared object code?\n```move\nmodule example::shared_counter {\n  use sui::object::{Self, UID};\n  use sui::transfer;\n  use sui::tx_context::{Self, TxContext};\n  \n  struct Counter has key {\n    id: UID,\n    value: u64\n  }\n  \n  public fun create(ctx: &mut TxContext) {\n    let counter = Counter {\n      id: object::new(ctx),\n      value: 0\n    };\n    transfer::share_object(counter);\n  }\n  \n  public fun increment(counter: Counter) {\n    counter.value = counter.value + 1;\n  }\n}\n```",
+    options: [
+      "The 'create' function should return the Counter object",
+      "The 'increment' function should take a mutable reference (&mut Counter) instead of moving the object",
+      "The Counter struct should have the 'store' ability",
+      "The 'increment' function should return the updated counter"
+    ],
+    correctAnswer: 1,
+    explanation: "The 'increment' function takes Counter by value (moves the object), but should take it by mutable reference (&mut Counter) instead. When you increment a shared object, you don't want to move the object but just modify it in place."
   }
 ];
 
@@ -262,14 +222,17 @@ export const getFallbackChallenges = (): DailyChallenge[] => {
     progress: 0
   });
 
-  // Create a quiz challenge (medium)
-  const quizIndex = seed % quizChallenges.length;
+  // Create a quiz challenge (medium) - use bug hunt quiz content sometimes
+  const useRegularQuiz = seed % 3 !== 0; // 2/3 chance for regular quiz, 1/3 for bug hunt quiz
+  const quizIndex = seed % (useRegularQuiz ? quizChallenges.length : bugHuntQuizzes.length);
   challenges.push({
     id: `quiz-fallback-${seed}-1`,
-    title: "Sui Blockchain Quiz",
-    description: "Test your knowledge of Sui blockchain concepts",
+    title: useRegularQuiz ? "Sui Blockchain Quiz" : "Bug Hunting Quiz",
+    description: useRegularQuiz 
+      ? "Test your knowledge of Sui blockchain concepts" 
+      : "Identify bugs in Sui Move code snippets",
     type: 'quiz',
-    content: quizChallenges[quizIndex],
+    content: useRegularQuiz ? quizChallenges[quizIndex] : bugHuntQuizzes[quizIndex],
     difficulty: 'medium',
     xpReward: 100,
     suiReward: 0.1,
@@ -280,45 +243,23 @@ export const getFallbackChallenges = (): DailyChallenge[] => {
     progress: 0
   });
 
-  // Create either a bug hunt or concept review challenge (hard)
-  // Use the seed to determine whether to create a bug hunt or concept review
-  if (seed % 2 === 0) {
-    // Create a bug hunt challenge
-    const bugHuntIndex = seed % bugHuntChallenges.length;
-    challenges.push({
-      id: `bug_hunt-fallback-${seed}-2`,
-      title: "Debug the Move Contract",
-      description: "Find and fix the bugs in this Sui Move smart contract code",
-      type: 'bug_hunt',
-      content: bugHuntChallenges[bugHuntIndex],
-      difficulty: 'hard',
-      xpReward: 200,
-      suiReward: 0.2,
-      tokenReward: 0.1,
-      dateCreated: today,
-      expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
-      completed: false,
-      progress: 0
-    });
-  } else {
-    // Create a concept review challenge
-    const conceptReviewIndex = seed % conceptReviewChallenges.length;
-    challenges.push({
-      id: `concept_review-fallback-${seed}-2`,
-      title: "Blockchain Concept Mastery",
-      description: "Review and apply this key Sui blockchain concept in a practical context",
-      type: 'concept_review',
-      content: conceptReviewChallenges[conceptReviewIndex],
-      difficulty: 'hard',
-      xpReward: 150,
-      suiReward: 0.15,
-      tokenReward: 0.1,
-      dateCreated: today,
-      expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
-      completed: false,
-      progress: 0
-    });
-  }
+  // Create a concept review challenge (hard)
+  const conceptReviewIndex = seed % conceptReviewChallenges.length;
+  challenges.push({
+    id: `concept_review-fallback-${seed}-2`,
+    title: "Blockchain Concept Mastery",
+    description: "Review and apply this key Sui blockchain concept in a practical context",
+    type: 'concept_review',
+    content: conceptReviewChallenges[conceptReviewIndex],
+    difficulty: 'hard',
+    xpReward: 150,
+    suiReward: 0.15,
+    tokenReward: 0.1,
+    dateCreated: today,
+    expiresAt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+    completed: false,
+    progress: 0
+  });
 
   return challenges;
 }; 

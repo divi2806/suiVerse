@@ -84,7 +84,7 @@ const ModulePage: React.FC = () => {
         duration: 3000,
       });
     } catch (error) {
-      console.error("Error disconnecting wallet:", error);
+      
       toast({
         title: "Error",
         description: "Failed to disconnect wallet.",
@@ -157,7 +157,7 @@ const ModulePage: React.FC = () => {
         });
       }
     } catch (err) {
-      console.error('Error saving flashcard progress:', err);
+      
       toast({
         title: "Error",
         description: "Failed to save your progress",
@@ -176,7 +176,7 @@ const ModulePage: React.FC = () => {
   // Listen for quiz reload events
   useEffect(() => {
     const handleQuizReload = () => {
-      console.log("Quiz reload requested - attempting to refresh module content");
+      
       
       // Try to reload the module content if we have it
       if (moduleId && walletAddress) {
@@ -185,7 +185,7 @@ const ModulePage: React.FC = () => {
     };
     
     const handleQuizFallbackLoaded = (event: CustomEvent) => {
-      console.log("Using fallback quiz questions");
+      
       
       // Use the fallback questions provided by the Quiz component
       if (event.detail && event.detail.questions && moduleContent) {
@@ -219,7 +219,7 @@ const ModulePage: React.FC = () => {
       const content = await getModule(moduleId);
       
       // Log the generated quiz questions for debugging
-      console.log(`%c[Quiz Debug] Module ${moduleId} questions loaded:`, 'background: #333; color: #bada55; padding: 2px 4px; border-radius: 2px;');
+      
       if (content.quiz && content.quiz.length > 0) {
         console.table(content.quiz.map(q => ({
           question: q.question.substring(0, 50) + (q.question.length > 50 ? '...' : ''),
@@ -227,9 +227,9 @@ const ModulePage: React.FC = () => {
           correctAnswer: q.correctAnswer,
           hasExplanation: !!q.explanation
         })));
-        console.log(`Total questions: ${content.quiz.length}`);
+        
       } else {
-        console.warn('No quiz questions were generated or returned!');
+        
       }
       
       setModuleContent(content);
@@ -279,7 +279,7 @@ const ModulePage: React.FC = () => {
       
       setLoading(false);
     } catch (err) {
-      console.error('Error fetching module content:', err);
+      
       setError('Failed to load module content. Please try again.');
       setLoading(false);
     }
@@ -341,7 +341,7 @@ const ModulePage: React.FC = () => {
         }
       }, 1000);
     } catch (err) {
-      console.error('Error saving quiz progress:', err);
+      
       toast({
         title: "Error",
         description: "Failed to save your quiz results",
@@ -378,7 +378,7 @@ const ModulePage: React.FC = () => {
         setModuleProgress(100);
       }, 2000);
     } catch (err) {
-      console.error('Error saving alien challenge progress:', err);
+      
       toast({
         title: "Error",
         description: "Failed to save your alien challenge results",
@@ -455,7 +455,7 @@ const ModulePage: React.FC = () => {
         });
       }
     } catch (err) {
-      console.error('Error checking achievements:', err);
+      
     }
   };
   
@@ -471,7 +471,7 @@ const ModulePage: React.FC = () => {
         return;
       }
       
-      console.log(`Starting module completion process for ${moduleId} by user ${walletAddress}`);
+      
       
       // Get the next module ID for navigation
       let nextModuleId = '';
@@ -484,7 +484,7 @@ const ModulePage: React.FC = () => {
         nextModuleId = `module-${currentNum + 1}`;
       }
       
-      console.log(`Next module ID: ${nextModuleId}`);
+      
       
       // Special handling for module-16 (last module)
       if (moduleId === 'module-16') {
@@ -503,7 +503,7 @@ const ModulePage: React.FC = () => {
             result = await completeModule(walletAddress, moduleId, moduleId);
             break; // Success, exit the loop
           } catch (error) {
-            console.error(`Error completing module (attempt ${retryCount + 1}):`, error);
+            
             retryCount++;
             if (retryCount < 3) {
               // Wait before retrying (exponential backoff)
@@ -522,7 +522,7 @@ const ModulePage: React.FC = () => {
             duration: 5000,
           });
         } else {
-          console.error("Failed to complete module after multiple attempts");
+          
           toast({
             title: "Sync Error",
             description: "Your progress was saved but rewards might be delayed. Please refresh the page.",
@@ -546,7 +546,7 @@ const ModulePage: React.FC = () => {
           result = await completeModule(walletAddress, moduleId, nextModuleId);
           break; // Success, exit the loop
         } catch (error) {
-          console.error(`Error completing module (attempt ${retryCount + 1}):`, error);
+          
           retryCount++;
           if (retryCount < 3) {
             // Wait before retrying (exponential backoff)
@@ -556,7 +556,7 @@ const ModulePage: React.FC = () => {
       }
       
       if (!result) {
-        console.error("Failed to complete module after multiple attempts");
+        
         toast({
           title: "Sync Error",
           description: "Your progress was saved but rewards might be delayed. Please refresh the page.",
@@ -618,7 +618,7 @@ const ModulePage: React.FC = () => {
         navigate(`/learning/${nextModuleId}`);
       }
     } catch (err) {
-      console.error('Critical error in handleCompleteModule:', err);
+      
       toast({
         title: "Error",
         description: "Failed to save module completion. Please try again or refresh the page.",
@@ -627,7 +627,7 @@ const ModulePage: React.FC = () => {
       
       // Try a minimal update to at least mark progress
       try {
-        console.log("Attempting minimal module completion");
+        
         const db = getFirestore();
         const userProgressRef = doc(db, 'learningProgress', walletAddress || '');
         
@@ -635,7 +635,7 @@ const ModulePage: React.FC = () => {
         const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), moduleId);
         await setDoc(moduleProgressRef, { completed: true }, { merge: true });
         
-        console.log("Minimal module completion successful");
+        
         
         // Parse the next module ID 
         let nextModuleId = '';
@@ -649,7 +649,7 @@ const ModulePage: React.FC = () => {
         // Navigate to next module anyway
         navigate(`/learning/${nextModuleId}`);
       } catch (recoveryError) {
-        console.error("Recovery attempt failed:", recoveryError);
+        
       }
     }
   };
@@ -706,16 +706,16 @@ const ModulePage: React.FC = () => {
       
       // Skip if we've already shown it
       if (shouldSkipPopup()) {
-        console.log("ModulePage: Skipping streak popup due to recent display");
+        
         return;
       }
       
       try {
-        console.log("ModulePage: Checking daily streak...");
+        
         const streakResult = await checkDailyStreak(walletAddress);
         
         if (streakResult.isNewDay) {
-          console.log("ModulePage: New day detected, showing streak popup");
+          
           
           // Set our local flag
           hasShownPopupInThisInstance = true;
@@ -742,21 +742,21 @@ const ModulePage: React.FC = () => {
             await refreshUserData();
           }
         } else {
-          console.log("ModulePage: Not a new day, skipping streak popup");
+          
         }
       } catch (error) {
-        console.error("ModulePage: Error checking daily streak:", error);
+        
       }
     };
     
     // Listen for streak check events from the AuthContext
     const handleStreakChecked = (event: CustomEvent) => {
       const streakData = event.detail;
-      console.log("Streak event received in ModulePage:", streakData);
+      
       
       // Skip if we've already shown the popup in this component instance
       if (hasShownPopupInThisInstance || window.hasShownStreakModalThisSession === true) {
-        console.log("ModulePage: Already shown streak popup, skipping event");
+        
         return;
       }
       
@@ -901,7 +901,7 @@ const ModulePage: React.FC = () => {
         );
         
       case 'quiz':
-        console.log("ModulePage: Rendering quiz section", moduleContent?.quiz ? `(${moduleContent.quiz.length} questions)` : '(no questions)');
+        
         return (
           <motion.div
             initial={{ opacity: 0 }}
@@ -1029,12 +1029,12 @@ const ModulePage: React.FC = () => {
   const LevelUpModal = () => {
     // Add logging for modal visibility changes
     useEffect(() => {
-      console.log(`LevelUpModal visibility changed: ${showLevelUpModal ? 'VISIBLE' : 'HIDDEN'}`);
+      
       
       // Add keyboard event listener to close with Escape key
       const handleEscKey = (e: KeyboardEvent) => {
         if (e.key === 'Escape' && showLevelUpModal) {
-          console.log('Escape key pressed - closing modal');
+          
           setShowLevelUpModal(false);
         }
       };
@@ -1042,7 +1042,7 @@ const ModulePage: React.FC = () => {
       // Add auto-close timeout as a fallback (15 seconds)
       const autoCloseTimeout = setTimeout(() => {
         if (showLevelUpModal) {
-          console.log('Auto-closing modal after timeout');
+          
           setShowLevelUpModal(false);
         }
       }, 15000);
@@ -1060,12 +1060,12 @@ const ModulePage: React.FC = () => {
     // Handle button click with event stopping
     const handleContinueClick = (e: React.MouseEvent) => {
       e.stopPropagation(); // Prevent event from bubbling up to backdrop
-      console.log('Continue button clicked directly');
+      
       try {
         setShowLevelUpModal(false);
-        console.log('Modal state updated to false via button handler');
+        
       } catch (error) {
-        console.error('Error in continue button handler:', error);
+        
       }
     };
     
@@ -1075,7 +1075,7 @@ const ModulePage: React.FC = () => {
       <div 
         className="fixed inset-0 flex items-center justify-center z-50 bg-black/70"
         onClick={() => {
-          console.log('Backdrop clicked - closing modal');
+          
           setShowLevelUpModal(false);
         }}
       >
@@ -1549,7 +1549,7 @@ const ModulePage: React.FC = () => {
                     duration: 3000,
                   });
                 } catch (err) {
-                  console.error("Manual completion error:", err);
+                  
                   toast({
                     title: "Error",
                     description: "Failed to manually complete module",

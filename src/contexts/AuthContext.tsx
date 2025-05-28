@@ -84,9 +84,9 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // Save exact timestamp for more precise checking
       localStorage.setItem(STREAK_POPUP_TIMESTAMP_KEY, Date.now().toString());
       hasShownStreakPopup = true;
-      console.log("Streak popup flag set for today:", today);
+      
     } catch (e) {
-      console.error("Could not save streak popup day to localStorage", e);
+      
     }
   };
 
@@ -104,7 +104,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         
         // If it's been over 24 hours since last popup, clear all flags to allow a new popup
         if (hoursSinceLastPopup >= 24) {
-          console.log("Over 24 hours since last streak popup, clearing flags to allow new popup");
+          
           hasShownStreakPopup = false;
           sessionStorage.removeItem(STREAK_POPUP_SESSION_KEY);
           localStorage.removeItem(STREAK_POPUP_KEY);
@@ -116,14 +116,14 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       // 1. Check memory variable first (most immediate)
       if (hasShownStreakPopup) {
-        console.log("Streak popup already shown in this component instance");
+        
         return true;
       }
       
       // 2. Check session storage (survives page refreshes but not browser restart)
       const shownThisSession = sessionStorage.getItem(STREAK_POPUP_SESSION_KEY) === 'true';
       if (shownThisSession) {
-        console.log("Streak popup already shown in this session");
+        
         hasShownStreakPopup = true; // Update memory flag
         return true;
       }
@@ -133,7 +133,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const lastTimestamp = parseInt(lastTimestampStr, 10);
         const sixHoursMs = 6 * 60 * 60 * 1000;
         if (Date.now() - lastTimestamp < sixHoursMs) {
-          console.log("Streak popup shown in the last 6 hours, skipping");
+          
           hasShownStreakPopup = true; // Update memory flag
           sessionStorage.setItem(STREAK_POPUP_SESSION_KEY, 'true'); // Update session flag
           return true;
@@ -144,17 +144,17 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const today = new Date().toISOString().split('T')[0];
       const lastDay = localStorage.getItem(STREAK_POPUP_KEY);
       if (lastDay === today) {
-        console.log("Streak popup already shown today:", today);
+        
         hasShownStreakPopup = true; // Update memory flag
         sessionStorage.setItem(STREAK_POPUP_SESSION_KEY, 'true'); // Update session flag
         return true;
       }
       
       // Not shown yet, can show the popup
-      console.log("Streak popup not shown yet today, can show");
+      
       return false;
     } catch (e) {
-      console.error("Could not check streak popup day from localStorage", e);
+      
       return hasShownStreakPopup; // Use memory flag as fallback
     }
   };
@@ -234,13 +234,13 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     
     try {
       setLoading(true);
-      console.log('Refreshing user data for wallet:', walletAddress);
+      
       
       const userDoc = await getDoc(doc(db, 'learningProgress', walletAddress));
       
       if (userDoc.exists()) {
         const dbData = userDoc.data();
-        console.log('Raw Firestore data from refresh:', dbData);
+        
         
         // Get the XP value from totalXpEarned
         let xpValue = 0;
@@ -262,13 +262,13 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           hasSeenOnboarding: dbData.hasSeenOnboarding || false
         };
         
-        console.log('Updated user data with photoURL:', updatedUserData.photoURL);
+        
         setUserData(updatedUserData);
       } else {
-        console.warn('User document not found during refresh');
+        
       }
     } catch (err) {
-      console.error("Error refreshing user data:", err);
+      
     } finally {
       setLoading(false);
     }
@@ -288,7 +288,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       // If user just logged in, force streak check
       if (isLoginEvent) {
-        console.log("User just connected wallet - forcing streak check");
+        
         forceCheck = true;
         // Clear the login flag
         sessionStorage.removeItem('just_connected_wallet');
@@ -298,7 +298,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         
         // If it's been over 24 hours since last popup, force a check
         if (hoursSinceLastPopup >= 24) {
-          console.log("Over 24 hours since last streak popup, forcing check");
+          
           forceCheck = true;
         }
       } else {
@@ -308,11 +308,11 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       // If not forcing check, see if we've already shown today
       if (!forceCheck && hasShownStreakPopupToday()) {
-        console.log("Already shown streak popup today, skipping");
+        
         return;
       }
       
-      console.log("Checking user streak...");
+      
       const streakResult = await checkDailyStreak(walletAddress);
       
       // Make sure we have the latest user data after streak check
@@ -342,12 +342,12 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
         document.dispatchEvent(streakEvent);
         
-        console.log("Daily streak checked and popup triggered:", streakResult);
+        
       } else {
-        console.log("Not a new day, skipping streak popup");
+        
       }
     } catch (err) {
-      console.error("Error checking daily streak:", err);
+      
     }
   };
 
@@ -376,7 +376,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       setUserData(newData);
     } catch (err) {
-      console.error("Error updating user data:", err);
+      
       throw err;
     }
   };
@@ -388,7 +388,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
 
     try {
-      console.log('Updating avatar to:', avatarUrl);
+      
       
       // Update in Firestore
       await setDoc(doc(db, 'learningProgress', walletAddress), {
@@ -402,7 +402,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         photoURL: avatarUrl
       });
       
-      console.log('Avatar updated successfully');
+      
       
       // Force a refresh to ensure all components get the updated avatar
       setTimeout(() => {
@@ -411,7 +411,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       return;
     } catch (err) {
-      console.error("Error updating avatar:", err);
+      
       throw err;
     }
   };
@@ -444,7 +444,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           if (userDoc.exists()) {
             // User exists, get their data
             const dbData = userDoc.data();
-            console.log('Raw Firestore data:', dbData);
+            
             
             // Get the XP value from totalXpEarned
             let xpValue = 0;
@@ -452,7 +452,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
               // Convert to number regardless of storage type
               xpValue = Number(dbData.totalXpEarned) || 0;
             }
-            console.log('XP value being set:', xpValue);
+            
             
             const userData: WalletUserData = {
               walletAddress: currentAccount.address,
@@ -467,7 +467,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
               hasSeenOnboarding: dbData.hasSeenOnboarding || false
             };
             
-            console.log('Setting userData with photoURL:', userData.photoURL);
+            
             setUserData(userData);
             
             // Update last login time
@@ -506,10 +506,10 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             await ensureLearningProgressInitialized(currentAccount.address, 'intro-to-sui');
             
             setUserData(newUserData);
-            console.log('Created new user data with photoURL:', avatarUrl);
+            
           }
         } catch (err) {
-          console.error("Error loading wallet data:", err);
+          
           setError("Failed to load wallet data");
         } finally {
           setLoading(false);
@@ -550,7 +550,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       // If there's a mismatch, update the level in Firestore
       if (calculatedLevel !== storedLevel) {
-        console.log(`Fixing level mismatch: XP = ${currentXp}, stored level = ${storedLevel}, calculated level = ${calculatedLevel}`);
+        
         
         await updateDoc(userProgressRef, {
           level: calculatedLevel
@@ -564,7 +564,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       
       return false;
     } catch (error) {
-      console.error('Error synchronizing user level:', error);
+      
       return false;
     }
   };

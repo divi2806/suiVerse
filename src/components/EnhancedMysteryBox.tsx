@@ -120,7 +120,7 @@ const EnhancedMysteryBox: React.FC<EnhancedMysteryBoxProps> = ({
       setIsPurchased(true);
       setIsPurchasing(false);
     } catch (error) {
-      console.error("Error adding mystery box to inventory:", error);
+      
       toast({
         title: "Purchase Error",
         description: "There was a problem adding the box to your inventory. Please try again.",
@@ -163,7 +163,7 @@ const EnhancedMysteryBox: React.FC<EnhancedMysteryBoxProps> = ({
         setIsPurchasing(false);
       }
     } catch (error) {
-      console.error("Error during purchase:", error);
+      
       toast({
         title: "Purchase Failed",
         description: "There was an error processing your payment. Please try again.",

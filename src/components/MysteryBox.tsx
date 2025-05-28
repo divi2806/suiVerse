@@ -196,7 +196,7 @@ const MysteryBox: React.FC<MysteryBoxProps> = ({
       onBoxOpened();
       
     } catch (error) {
-      console.error('Error processing rewards:', error);
+      
       toast({
         title: "Error",
         description: "There was a problem processing your rewards. Please try again.",

@@ -41,7 +41,7 @@ const OnboardingTutorialModal: React.FC<OnboardingTutorialModalProps> = ({
         try {
           // Only update if needed
           if (userData.hasSeenOnboarding === false) {
-            console.log("Setting onboarding flag on component mount");
+            
             
             // Instead of spreading the entire userData object which may contain undefined values,
             // explicitly set each property we need
@@ -60,7 +60,7 @@ const OnboardingTutorialModal: React.FC<OnboardingTutorialModalProps> = ({
             await updateUserData(updatedData);
           }
         } catch (error) {
-          console.error("Error updating onboarding status:", error);
+          
         }
       };
       
@@ -105,7 +105,7 @@ const OnboardingTutorialModal: React.FC<OnboardingTutorialModalProps> = ({
         navigate('/learning');
       }, 200);
     } catch (error) {
-      console.error("Error completing onboarding:", error);
+      
       // Make sure we still close the modal even if there's an error
       onClose();
     }

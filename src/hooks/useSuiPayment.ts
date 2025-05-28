@@ -108,7 +108,7 @@ export function useSuiPayment() {
               });
             },
             onError: (error) => {
-              console.error('Payment error:', error);
+              
               setError('Error processing payment');
               toast({
                 title: "Payment Error",
@@ -124,7 +124,7 @@ export function useSuiPayment() {
         );
       });
     } catch (error) {
-      console.error('Payment error:', error);
+      
       setError('Error processing payment');
       toast({
         title: "Payment Error",
@@ -192,7 +192,7 @@ export function useSuiPayment() {
               });
             },
             onError: (error) => {
-              console.error('Payment error:', error);
+              
               setError('Error processing payment');
               toast({
                 title: "Payment Error",
@@ -208,7 +208,7 @@ export function useSuiPayment() {
         );
       });
     } catch (error) {
-      console.error('Payment error:', error);
+      
       setError('Error processing payment');
       toast({
         title: "Payment Error",

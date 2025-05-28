@@ -1,18 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import CodePuzzleChallenge from './challenge-types/CodePuzzleChallenge';
-import QuizChallenge from './challenge-types/QuizChallenge';
-import BugHuntChallenge from './challenge-types/BugHuntChallenge';
-import ConceptReviewChallenge from './challenge-types/ConceptReviewChallenge';
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogDescription, 
+  DialogFooter, 
+  DialogHeader, 
+  DialogTitle 
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Confetti } from "@/components/ui/confetti";
-import { Trophy, Star, Gift } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { DailyChallenge } from '@/services/dailyChallengesService';
+import { ChallengeType } from '@/services/challengeTypes';
+import CodePuzzleChallenge from './challenge-types/CodePuzzleChallenge';
+import QuizChallenge from './challenge-types/QuizChallenge';
+import ConceptReviewChallenge from './challenge-types/ConceptReviewChallenge';
+import SecurityAuditChallenge from './challenge-types/SecurityAuditChallenge';
+import Confetti from './ui/confetti';
+
+// Create a VisuallyHidden component for accessibility
+const VisuallyHidden = ({ children }: { children: React.ReactNode }) => (
+  <span 
+    className="absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0" 
+    style={{ clip: 'rect(0, 0, 0, 0)' }}
+  >
+    {children}
+  </span>
+);
 
 interface ChallengeRunnerProps {
   challenge: DailyChallenge;
-  onComplete: (score: number) => void;
+  onComplete: (score: number, isCorrect?: boolean) => void;
   onCancel: () => void;
 }
 
@@ -23,72 +41,109 @@ const ChallengeRunner: React.FC<ChallengeRunnerProps> = ({
 }) => {
   const [showRewardDialog, setShowRewardDialog] = useState(false);
   const [finalScore, setFinalScore] = useState(0);
-  
-  // Log challenge content when component mounts
+
+  // Log challenge content for debugging
   useEffect(() => {
-    console.log("===== CHALLENGE CONTENT START =====");
-    console.log("Challenge Type:", challenge.type);
-    console.log("Challenge Title:", challenge.title);
-    console.log("Challenge Content:", challenge.content);
-    console.log("===== CHALLENGE CONTENT END =====");
+    
+    
+    
+    
+    
+    if (challenge.type === 'code_puzzle') {
+      
+      const content = challenge.content;
+      
+      
+      
+      
+      
+    } 
+    else if (challenge.type === 'quiz') {
+      
+      const content = challenge.content;
+      
+      
+      
+      
+      
+    }
+    else if (challenge.type === 'security_audit') {
+      
+      const content = challenge.content;
+      
+      
+      
+      
+      
+    }
+    
+    
   }, [challenge]);
   
   // Handle challenge completion
-  const handleComplete = (score: number) => {
+  const handleComplete = (score: number, isCorrect: boolean = true) => {
     setFinalScore(score);
-    setShowRewardDialog(true);
     
-    // Start confetti animation
-    const confetti = document.getElementById('reward-confetti');
-    if (confetti) {
-      (confetti as any).start();
+    // Only show the reward dialog if the answer was correct
+    if (isCorrect) {
+      setShowRewardDialog(true);
+      
+      // Start confetti animation
+      const confetti = document.getElementById('reward-confetti');
+      if (confetti) {
+        (confetti as any).start();
+      }
+    } else {
+      // Immediately notify parent of incorrect completion
+      onComplete(score, isCorrect);
     }
-    
-    // Send completion to parent after dialog is shown
-    // This lets the user see their rewards
   };
   
   // Handle confirmation of rewards
   const handleConfirmReward = () => {
     setShowRewardDialog(false);
-    onComplete(finalScore);
+    onComplete(finalScore, true); // Pass isCorrect=true when rewards are confirmed
   };
   
-  // Render appropriate challenge type
+  // Render the appropriate challenge component based on type
   const renderChallenge = () => {
-    switch (challenge.type) {
+    switch (challenge.type as ChallengeType) {
       case 'code_puzzle':
         return (
-          <CodePuzzleChallenge 
-            challenge={challenge.content} 
+          <CodePuzzleChallenge
+            challenge={challenge}
             onComplete={handleComplete}
             onCancel={onCancel}
           />
         );
+        
       case 'quiz':
         return (
-          <QuizChallenge 
-            challenge={challenge.content} 
+          <QuizChallenge
+            challenge={challenge}
             onComplete={handleComplete}
             onCancel={onCancel}
           />
         );
-      case 'bug_hunt':
-        return (
-          <BugHuntChallenge 
-            challenge={challenge.content} 
-            onComplete={handleComplete}
-            onCancel={onCancel}
-          />
-        );
+        
       case 'concept_review':
         return (
           <ConceptReviewChallenge
-            challenge={challenge.content}
+            challenge={challenge}
             onComplete={handleComplete}
             onCancel={onCancel}
           />
         );
+        
+      case 'security_audit':
+        return (
+          <SecurityAuditChallenge
+            challenge={challenge}
+            onComplete={handleComplete}
+            onCancel={onCancel}
+          />
+        );
+        
       default:
         return (
           <div className="p-8 text-center">
@@ -108,6 +163,9 @@ const ChallengeRunner: React.FC<ChallengeRunnerProps> = ({
       {/* Reward Dialog */}
       <Dialog open={showRewardDialog} onOpenChange={setShowRewardDialog}>
         <DialogContent className="sm:max-w-[425px] text-center p-0 overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="sr-only">Challenge Complete</DialogTitle>
+          </DialogHeader>
           <div className="relative">
             {/* Background effect */}
             <div className="absolute inset-0 bg-gradient-to-b from-primary/20 to-background z-0" />
@@ -143,40 +201,11 @@ const ChallengeRunner: React.FC<ChallengeRunnerProps> = ({
                 Great job! You've earned rewards.
               </motion.p>
               
-              <motion.div 
-                className="space-y-4 mb-6"
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.3, duration: 0.5 }}
-              >
-                <div className="flex items-center justify-center gap-3 p-3 bg-card/60 rounded-lg">
-                  <Star className="h-5 w-5 text-yellow-500" />
-                  <span className="font-medium">{challenge.xpReward} XP</span>
-                </div>
-                
-                <div className="flex items-center justify-center gap-3 p-3 bg-card/60 rounded-lg">
-                  <Gift className="h-5 w-5 text-primary" />
-                  <span className="font-medium">{challenge.suiReward} SUI Tokens</span>
-                </div>
-                
-                <div className="flex items-center justify-center gap-3 p-3 bg-card/60 rounded-lg">
-                  <Trophy className="h-5 w-5 text-amber-500" />
-                  <span className="font-medium">{finalScore} Points</span>
-                </div>
-              </motion.div>
-              
-              <motion.div
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.4, duration: 0.5 }}
-              >
-                <Button 
-                  className="w-full neon-button" 
-                  onClick={handleConfirmReward}
-                >
+              <DialogFooter className="flex flex-col sm:flex-row sm:justify-center gap-2 mt-4">
+                <Button onClick={handleConfirmReward}>
                   Claim Rewards
                 </Button>
-              </motion.div>
+              </DialogFooter>
             </div>
           </div>
         </DialogContent>

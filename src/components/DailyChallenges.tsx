@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Star, Trophy, Gift, Clock, Loader2, Zap, AlertTriangle, BookOpen, X, Coins, Check, ArrowRight } from 'lucide-react';
+import { Calendar, Star, Trophy, Gift, Clock, Loader2, Zap, AlertTriangle, BookOpen, X, Coins, Check, ArrowRight, Gauge, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/components/ui/use-toast';
@@ -59,11 +59,11 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
   
   // Log wallet connection status on component mount and when wallet changes
   useEffect(() => {
-    console.log("DailyChallenges: Wallet connection status");
-    console.log("  walletAddress prop:", walletAddress);
-    console.log("  userId prop:", userId);
-    console.log("  Has valid wallet:", !!walletAddress && walletAddress.trim() !== '');
-    console.log("  Challenge count:", challenges.length);
+    
+    
+    
+    
+    
   }, [walletAddress, userId, challenges.length]);
   
   // Calculate time until reset
@@ -95,24 +95,24 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
   // Handle claiming rewards with loading state
   const handleClaimReward = async (challengeId: string) => {
     // Additional debug info
-    console.log("handleClaimReward called for challenge:", challengeId);
-    console.log("Current walletAddress:", walletAddress);
-    console.log("Current userId:", userId);
+    
+    
+    
     
     // Prevent multiple claim attempts
     if (claimingReward) {
-      console.log("Already processing a claim, ignoring duplicate request");
+      
       return;
     }
     
     // If we have a valid wallet address, proceed with claiming
     if (walletAddress) {
-      console.log("Claiming reward with valid wallet address:", walletAddress);
+      
       
       // Find the challenge being claimed
       const challenge = challenges.find(c => c.id === challengeId);
       if (!challenge) {
-        console.error("Challenge not found:", challengeId);
+        
         toast({
           title: "Error",
           description: "Challenge not found. Please try again.",
@@ -123,7 +123,7 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
       
       // Check if this challenge is already claimed
       if (challenge.rewardClaimed) {
-        console.log("Challenge already claimed:", challengeId);
+        
         toast({
           title: "Already Claimed",
           description: "You've already claimed rewards for this challenge.",
@@ -139,7 +139,7 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
     }
     
     // Only try to connect wallet if we truly don't have an address
-    console.log("No wallet address found, showing connect prompt");
+    
     // Try to connect wallet if not connected
     const connectWalletButton = document.getElementById('connect-wallet-button');
     if (connectWalletButton) {
@@ -207,7 +207,7 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
         duration: 5000,
       });
     } catch (error) {
-      console.error("Error claiming reward:", error);
+      
       toast({
         title: "Error Claiming Reward",
         description: "There was a problem claiming your reward. Please try again.",
@@ -231,7 +231,7 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
         setCompleted(prev => [...prev, challengeId]);
       }
     } catch (error) {
-      console.error('Error updating challenge progress:', error);
+      
       toast({
         title: "Error",
         description: "Failed to update challenge progress.",
@@ -244,20 +244,20 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
   // Handle starting a challenge with the interactive runner
   const handleStartChallengeWithRunner = (challenge: DailyChallenge) => {
     // Additional debug info
-    console.log("handleStartChallengeWithRunner called with challenge:", challenge.id);
-    console.log("Current walletAddress:", walletAddress);
-    console.log("Current userId:", userId);
+    
+    
+    
     
     // If this is happening but we're still seeing the wallet connection prompt,
     // it's likely that the walletAddress prop isn't being passed correctly
     if (walletAddress) {
-      console.log("Starting challenge with valid wallet address:", walletAddress);
+      
       setActiveChallenge(challenge);
       return;
     }
     
     // Only try to connect wallet if we truly don't have an address
-    console.log("No wallet address found, showing connect prompt");
+    
     // Try to connect wallet if not connected
     const connectWalletButton = document.getElementById('connect-wallet-button');
     if (connectWalletButton) {
@@ -277,30 +277,40 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
   };
   
   // Handle challenge completion from the runner
-  const handleChallengeComplete = async (score: number) => {
+  const handleChallengeComplete = async (score: number, isCorrect: boolean = false) => {
     if (!activeChallenge || !walletAddress) {
       setActiveChallenge(null);
       return;
     }
     
     try {
-      // Update challenge progress to 100%
-      await updateChallengeProgress(activeChallenge.id, walletAddress, 100);
-      
-      // Add to completed challenges
-      setCompleted(prev => [...prev, activeChallenge.id]);
-      
-      // Show success message
-      toast({
-        title: "Challenge Completed!",
-        description: `You earned ${activeChallenge.xpReward} XP and can now claim your rewards.`,
-        duration: 5000,
-      });
+      if (isCorrect) {
+        // Only update progress to 100% and award XP if the answer was correct
+        await updateChallengeProgress(activeChallenge.id, walletAddress, 100);
+        
+        // Add to completed challenges
+        setCompleted(prev => [...prev, activeChallenge.id]);
+        
+        // Show success message
+        toast({
+          title: "Challenge Completed!",
+          description: `You earned ${activeChallenge.xpReward} XP and can now claim your rewards.`,
+          duration: 5000,
+        });
+      } else {
+        // For incorrect answers, show an error message
+        toast({
+          title: "Incorrect Answer",
+          description: "Your answer was incorrect. No XP or rewards have been earned.",
+          variant: "destructive",
+          duration: 5000,
+        });
+      }
       
       // Reset active challenge
       setActiveChallenge(null);
     } catch (error) {
-      console.error('Error completing challenge:', error);
+      
       toast({
         title: "Error",
         description: "Failed to save challenge progress.",
@@ -319,8 +329,10 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
     switch (type) {
       case 'code_puzzle': return <Zap className="h-4 w-4 text-blue-500" />;
       case 'quiz': return <Star className="h-4 w-4 text-yellow-500" />;
-      case 'bug_hunt': return <AlertTriangle className="h-4 w-4 text-red-500" />;
       case 'concept_review': return <BookOpen className="h-4 w-4 text-purple-500" />;
+      case 'security_audit': return <AlertTriangle className="h-4 w-4 text-orange-500" />;
+      case 'optimization': return <Gauge className="h-4 w-4 text-green-500" />;
+      case 'defi_scenario': return <Wallet className="h-4 w-4 text-pink-500" />;
       default: return <Star className="h-4 w-4 text-yellow-500" />;
     }
   };

@@ -198,7 +198,7 @@ const Inventory = () => {
       setNftItems(nftsData);
       setLoading(prev => ({ ...prev, nfts: false }));
     } catch (error) {
-      console.error('Error fetching NFTs:', error);
+      
       setLoading(prev => ({ ...prev, nfts: false }));
     }
   };
@@ -262,7 +262,7 @@ const Inventory = () => {
         
         setLoading(prev => ({ ...prev, tokens: false }));
       } catch (error) {
-        console.error('Error fetching tokens:', error);
+        
         setLoading(prev => ({ ...prev, tokens: false }));
       }
     };
@@ -301,7 +301,7 @@ const Inventory = () => {
         setMysteryBoxes(boxesData);
         setLoading(prev => ({ ...prev, mysteryBoxes: false }));
       } catch (error) {
-        console.error('Error fetching mystery boxes:', error);
+        
         setLoading(prev => ({ ...prev, mysteryBoxes: false }));
       }
     };
@@ -378,7 +378,7 @@ const Inventory = () => {
       
       setShowOpenDialog(true);
     } catch (error) {
-      console.error('Error preparing to open mystery box:', error);
+      
       toast({
         title: "Error",
         description: "Failed to open mystery box. Please try again.",
@@ -434,7 +434,7 @@ const Inventory = () => {
       setShowOpenDialog(false);
       setSelectedMysteryBox(null);
     } catch (error) {
-      console.error('Error processing mystery box rewards:', error);
+      
       toast({
         title: "Error",
         description: "Failed to process rewards. Please try again.",
@@ -465,15 +465,15 @@ const Inventory = () => {
             await refreshUserData();
           }
           
-          console.log(`Successfully added ${reward.amount} XP to user profile`);
+          
         } catch (error) {
-          console.error('Error updating XP:', error);
+          
         }
       } else if (reward.type === 'token') {
         if (reward.symbol === 'SUI') {
           // For SUI tokens, use the rewardUser function to transfer from admin wallet
           try {
-            console.log(`Sending ${reward.amount} SUI to ${walletAddress}`);
+            
             const result = await rewardUser(
               walletAddress, 
               reward.amount, 
@@ -487,9 +487,9 @@ const Inventory = () => {
                 await refreshUserData();
               }
               
-              console.log(`Successfully sent ${reward.amount} SUI to ${walletAddress}`);
+              
             } else {
-              console.error('Failed to send SUI reward:', result.message);
+              
               
               // Still update the user's record in Firestore even if the transaction failed
               // This way we can retry the payment later if needed
@@ -498,7 +498,7 @@ const Inventory = () => {
               });
             }
           } catch (error) {
-            console.error('Error processing SUI reward:', error);
+            
           }
         } else {
           // Update other tokens (like Learning Points)
@@ -517,7 +517,7 @@ const Inventory = () => {
               });
             }
           } catch (error) {
-            console.error('Error updating token balance:', error);
+            
           }
         }
       } else if (reward.type === 'nft') {
@@ -585,7 +585,7 @@ const Inventory = () => {
       });
       
     } catch (error) {
-      console.error('Error updating avatar:', error);
+      
       toast({
         title: "Update Failed",
         description: "Failed to update your profile avatar. Please try again.",

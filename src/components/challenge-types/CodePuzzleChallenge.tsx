@@ -4,10 +4,19 @@ import { Zap, Trophy, Check, X, HelpCircle, ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/use-toast";
+import { DailyChallenge } from '@/services/dailyChallengesService';
+
+interface CodePuzzleContent {
+  challenge: string;
+  codeTemplate: string;
+  solution: string;
+  hint1: string;
+  hint2: string;
+}
 
 interface CodePuzzleChallengeProps {
-  challenge: any;
-  onComplete: (score: number) => void;
+  challenge: DailyChallenge;
+  onComplete: (score: number, isCorrect?: boolean) => void;
   onCancel: () => void;
 }
 
@@ -16,6 +25,9 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
   onComplete, 
   onCancel 
 }) => {
+  // Extract content from challenge
+  const content = challenge.content as CodePuzzleContent;
+  
   const [selectedOption, setSelectedOption] = useState<string>('');
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [showHint, setShowHint] = useState<number>(0); // 0 = no hint, 1 = first hint, 2 = second hint
@@ -65,7 +77,7 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
     }
     
     // Check if solution is correct (case insensitive and whitespace trimmed)
-    const normalizedSolution = challenge.solution.replace(/\s+/g, ' ').trim().toLowerCase();
+    const normalizedSolution = content.solution.replace(/\s+/g, ' ').trim().toLowerCase();
     const normalizedSelection = selectedOption.replace(/\s+/g, ' ').trim().toLowerCase();
     
     const correct = normalizedSolution === normalizedSelection;
@@ -77,7 +89,12 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
       
       // Delay completion to show success message
       setTimeout(() => {
-        onComplete(finalScore);
+        onComplete(finalScore, true);
+      }, 2000);
+    } else {
+      // If incorrect, wait a bit then notify with isCorrect=false
+      setTimeout(() => {
+        onComplete(0, false);
       }, 2000);
     }
   };
@@ -99,7 +116,7 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
       });
       
       setTimeout(() => {
-        onComplete(25); // Minimum score for attempt
+        onComplete(25, false); // Minimum score for attempt, failed due to timeout
       }, 2000);
     }
   }, [timeLeft, onComplete]);
@@ -133,9 +150,9 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
       </div>
       
       <div className="mb-6">
-        <h3 className="text-lg font-medium mb-2">{challenge.challenge}</h3>
+        <h3 className="text-lg font-medium mb-2">{content.challenge}</h3>
         <div className="bg-black/60 text-green-400 p-4 rounded-md font-mono text-sm overflow-x-auto mb-4">
-          <pre>{challenge.codeTemplate}</pre>
+          <pre>{content.codeTemplate}</pre>
         </div>
       </div>
       
@@ -151,44 +168,42 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
       </div>
       
       <div className="flex justify-between items-center">
-        <div>
-          {showHint > 0 && (
-            <div className="bg-primary/10 p-3 rounded-md text-sm mb-4">
-              <p className="font-medium text-primary mb-1">Hint {showHint}:</p>
-              <p>{showHint === 1 ? challenge.hint1 : challenge.hint2}</p>
-            </div>
-          )}
-          
-          {showHint < 2 && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={showNextHint}
-                    disabled={isCorrect !== null}
-                  >
-                    <HelpCircle className="h-4 w-4 mr-1" />
-                    {showHint === 0 ? "Show Hint" : "Another Hint"}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Using hints will reduce your score</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
+        <div className="flex space-x-2">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={showNextHint}
+                  disabled={showHint >= 2}
+                >
+                  <HelpCircle className="h-4 w-4 mr-1" />
+                  {showHint === 0 ? 'Show Hint' : 'Next Hint'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Using hints reduces your score</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
         
         <Button 
-          className="neon-button"
-          onClick={handleSubmit}
-          disabled={isCorrect !== null || !selectedOption}
+          onClick={handleSubmit} 
+          disabled={!selectedOption.trim() || isCorrect !== null}
         >
           Submit Solution
         </Button>
       </div>
+      
+      {showHint > 0 && (
+        <div className="mt-4 p-3 bg-primary/10 rounded-md border border-primary/20">
+          <p className="text-sm">
+            <span className="font-medium">Hint {showHint}:</span> {showHint === 1 ? content.hint1 : content.hint2}
+          </p>
+        </div>
+      )}
       
       {isCorrect !== null && (
         <motion.div 

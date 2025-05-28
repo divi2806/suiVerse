@@ -15,6 +15,14 @@ import {
 import { db } from '@/lib/firebase-config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getFallbackChallenges } from './hardcodedChallenges';
+import { 
+  ChallengeType, 
+  DeprecatedChallengeType, 
+  AnyHistoricalChallengeType,
+  isValidChallengeType,
+  getReplacementChallengeType
+} from './challengeTypes';
+import { sendSuiReward } from '@/utils/suiPaymentService';
 
 // Import the API key from environment or use fallback
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyC9YKF89cnfSAAzM6TilPY29Ea9LeiIf8s';
@@ -40,18 +48,6 @@ const generateWithTimeout = async (prompt: string, timeoutMs = 10000): Promise<a
     }
   });
 };
-
-// Challenge types that will be rotated daily
-export type ChallengeType = 
-  | 'code_puzzle' 
-  | 'quiz' 
-  | 'bug_hunt' 
-  | 'concept_review' 
-  | 'security_audit' 
-  | 'optimization'
-  | 'defi_scenario'
-  | 'nft_design'
-  | 'math_puzzle';
 
 // Interface for daily challenge
 export interface DailyChallenge {
@@ -100,13 +96,10 @@ export const getChallengeCategoriesForToday = (): ChallengeType[] => {
   const allTypes: ChallengeType[] = [
     'code_puzzle', 
     'quiz', 
-    'bug_hunt', 
     'concept_review', 
     'security_audit', 
     'optimization',
-    'defi_scenario',
-    'nft_design',
-    'math_puzzle'
+    'defi_scenario'
   ];
   
   // Use the seed to select today's challenge types
@@ -126,155 +119,199 @@ export const getChallengeCategoriesForToday = (): ChallengeType[] => {
   return selectedTypes;
 };
 
+// Enhanced logging for Gemini API responses
+const logGeminiResponse = (type: ChallengeType, prompt: string, response: string, parsedData: any) => {
+  
+  
+  
+  
+  if (parsedData) {
+    
+    
+    // Log specific properties based on challenge type
+    switch (type as AnyHistoricalChallengeType) {
+      case 'math_puzzle':
+        
+        
+        
+        
+        
+        
+        
+        break;
+        
+      case 'security_audit':
+        
+        
+        
+        
+        break;
+        
+      // Add similar logging for other challenge types
+    }
+  } else {
+    
+  }
+  
+  
+};
+
 // Generate challenge content using Gemini AI
 export const generateChallengeContent = async (
   type: ChallengeType, 
   difficulty: 'easy' | 'medium' | 'hard'
 ): Promise<any> => {
   try {
-    console.log(`Generating ${difficulty} ${type} challenge with Gemini API...`);
+    
     const prompt = getPromptForChallengeType(type, difficulty);
-    console.log("Prompt sent to Gemini:", prompt);
+    
     
     const result = await generateWithTimeout(prompt, 15000); // 15 second timeout
     const text = result.response.text();
     
-    console.log("===== RAW GEMINI RESPONSE =====");
-    console.log(text);
-    console.log("===============================");
+    
+    
+    
     
     try {
       // First try to extract JSON from the response using various methods
       let parsedData = await extractJSON(text);
       
-      console.log("===== CHALLENGE STRUCTURE DETAILS =====");
-      console.log("Challenge type:", type);
-      console.log("Challenge structure:", parsedData ? Object.keys(parsedData) : "No data parsed");
       
+      
+      
+      // Log detailed information about the parsed challenge content
       if (parsedData) {
+        
+        
         // Log specific details based on challenge type
-        switch (type) {
-          case 'code_puzzle':
-            console.log("Code puzzle details:");
-            console.log("- Challenge prompt:", parsedData.challenge?.substring(0, 100) + "...");
-            console.log("- Code template length:", parsedData.codeTemplate?.length || 0);
-            console.log("- Solution provided:", !!parsedData.solution);
+        switch (type as AnyHistoricalChallengeType) {
+          case 'math_puzzle':
+            
+            
+            
+            
+            
+            
+            
+            
+            break;
+            
+          case 'security_audit':
+            
+            
+            
+            
             break;
             
           case 'quiz':
-            console.log("Quiz details:");
-            console.log("- Question:", parsedData.question?.substring(0, 100) + "...");
-            console.log("- Options count:", parsedData.options?.length || 0);
-            console.log("- Correct answer index:", parsedData.correctAnswer);
+            
+            
+            
+            
             break;
             
-          case 'bug_hunt':
-            console.log("Bug hunt details:");
-            console.log("- Scenario:", parsedData.scenario?.substring(0, 100) + "...");
-            console.log("- Code length:", parsedData.buggyCode?.length || 0);
-            console.log("- Bugs count:", parsedData.bugs?.length || 0);
-            break;
+          case 'optimization':
             
-          case 'concept_review':
-            console.log("Concept review details:");
-            console.log("- Concept:", parsedData.concept);
-            console.log("- Description:", parsedData.description?.substring(0, 100) + "...");
-            console.log("- Question prompt:", parsedData.questionPrompt?.substring(0, 100) + "...");
-            console.log("- Key points count:", parsedData.keyPoints?.length || 0);
+            
+            
+            
             break;
             
           default:
-            console.log("Other challenge type, generic structure:", parsedData);
+            
         }
+      } else {
+        
       }
-      console.log("====================================");
+      
       
       // Validate the extracted content
       if (parsedData && isValidChallengeContent(parsedData, type)) {
-        console.log("Successfully parsed and validated challenge content");
+        
         return parsedData;
       } else {
-        console.log("Generated content failed validation, using fallback...");
-        return getFallbackContent(type, difficulty);
+        
+        return getMultipleFallbackContent(type, difficulty);
       }
     } catch (error) {
-      console.error("Error parsing Gemini response:", error);
-      return getFallbackContent(type, difficulty);
+      
+      return getMultipleFallbackContent(type, difficulty);
     }
   } catch (error) {
-    console.error("Error generating challenge with Gemini:", error);
-    return getFallbackContent(type, difficulty);
+    
+    return getMultipleFallbackContent(type, difficulty);
   }
 };
 
 // Helper function to extract JSON from text using multiple methods
 const extractJSON = async (text: string): Promise<any | null> => {
-  console.log("Attempting to parse Gemini response as JSON...");
+  
   
   // Method 1: Look for JSON block between markdown code fences
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (jsonMatch && jsonMatch[1]) {
-    console.log("Found JSON block in code fences, attempting to parse");
+    
     const jsonText = jsonMatch[1].trim();
     try {
       const parsedJson = JSON.parse(jsonText);
-      console.log("Successfully parsed JSON from code block");
+      
       return parsedJson;
     } catch (e) {
-      console.log("Failed to parse JSON from code block, trying to fix malformed JSON");
-      console.log("Error:", e.message);
-      console.log("Problematic JSON:", jsonText);
+      
+      
+      
       
       // Try to fix common JSON issues (unescaped quotes, trailing commas)
       const fixedJson = fixMalformedJson(jsonText);
-      console.log("Fixed JSON:", fixedJson);
+      
       
       try {
         const parsedFixedJson = JSON.parse(fixedJson);
-        console.log("Successfully parsed fixed JSON");
+        
         return parsedFixedJson;
       } catch (e2) {
-        console.log("Still failed to parse after fixing JSON:", e2.message);
+        
       }
     }
   }
   
   // Method 2: Try to extract any JSON-like structure from the text
-  console.log("No JSON block in code fences, trying to find JSON object in text");
+  
   const jsonObjectMatch = text.match(/\{[\s\S]*\}/);
   if (jsonObjectMatch) {
     const jsonText = jsonObjectMatch[0].trim();
-    console.log("Found potential JSON object:", jsonText.substring(0, 100) + "...");
+    
     
     try {
       const parsedJson = JSON.parse(jsonText);
-      console.log("Successfully parsed JSON object from text");
+      
       return parsedJson;
     } catch (e) {
-      console.log("Failed to parse JSON object, trying to fix malformed JSON");
-      console.log("Error:", e.message);
+      
+      
       
       const fixedJson = fixMalformedJson(jsonText);
-      console.log("Fixed JSON:", fixedJson.substring(0, 100) + "...");
+      
       
       try {
         const parsedFixedJson = JSON.parse(fixedJson);
-        console.log("Successfully parsed fixed JSON object");
+        
         return parsedFixedJson;
       } catch (e2) {
-        console.log("Still failed to parse after fixing JSON object:", e2.message);
+        
       }
     }
   }
   
-  console.error("Could not extract valid JSON from response");
+  
   return null;
 };
 
 // Helper function to fix common JSON parsing issues
 const fixMalformedJson = (jsonText: string): string => {
-  console.log("===== FIXING MALFORMED JSON =====");
-  console.log("Original JSON:", jsonText.substring(0, 100) + (jsonText.length > 100 ? "..." : ""));
+  
+  
   
   let fixed = jsonText;
   
@@ -285,39 +322,39 @@ const fixMalformedJson = (jsonText: string): string => {
     return match.replace(/(?<!\\)"/g, '\\"');
   });
   if (before1 !== fixed) {
-    console.log("Fixed unescaped quotes");
+    
   }
   
   // Fix trailing commas in objects and arrays
   const before2 = fixed;
   fixed = fixed.replace(/,\s*([}\]])/g, '$1');
   if (before2 !== fixed) {
-    console.log("Fixed trailing commas");
+    
   }
   
   // Fix missing quotes around property names
   const before3 = fixed;
   fixed = fixed.replace(/([{,]\s*)([a-zA-Z0-9_$]+)(\s*:)/g, '$1"$2"$3');
   if (before3 !== fixed) {
-    console.log("Fixed missing quotes around property names");
+    
   }
   
   // Fix single quotes used instead of double quotes
   const before4 = fixed;
   fixed = fixed.replace(/'/g, '"');
   if (before4 !== fixed) {
-    console.log("Fixed single quotes to double quotes");
+    
   }
   
   // Remove any control characters that might break JSON
   const before5 = fixed;
   fixed = fixed.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
   if (before5 !== fixed) {
-    console.log("Removed control characters");
+    
   }
   
-  console.log("Fixed JSON:", fixed.substring(0, 100) + (fixed.length > 100 ? "..." : ""));
-  console.log("===== END JSON FIXING =====");
+  
+  
   
   return fixed;
 };
@@ -337,7 +374,7 @@ Ensure all JSON syntax is correct with proper commas, braces, and no trailing co
 
 `;
 
-  switch (type) {
+  switch (type as AnyHistoricalChallengeType) {
     case 'code_puzzle':
       return promptPrefix + 
         'Create a Sui Move coding puzzle for ' + difficultyLevel + ' blockchain developers. ' +
@@ -368,6 +405,20 @@ Ensure all JSON syntax is correct with proper commas, braces, and no trailing co
         'Include context, contract code, and ' + (difficulty === 'easy' ? '1-2' : difficulty === 'medium' ? '2-3' : '3-4') + ' security issues with severity, description, location, and recommendation. ' +
         'Structure: scenario, contractCode, securityIssues (array of objects with severity, description, location, recommendation).';
 
+    case 'optimization':
+      return promptPrefix + 
+        'Create a code optimization challenge for Sui Move for ' + difficultyLevel + ' developers. ' +
+        'Include a scenario, original inefficient code, optimization goals (array), hints (array), sample optimized solution, and ' +
+        (difficulty === 'easy' ? '2-3' : difficulty === 'medium' ? '3-4' : '4-5') + ' optimization points with description and explanation. ' +
+        'Structure: scenario, originalCode, optimizationGoals (array), hints (array), sampleSolution, optimizationPoints (array of objects with description, explanation).';
+
+    case 'defi_scenario':
+      return promptPrefix + 
+        'Create a DeFi decision scenario challenge for ' + difficultyLevel + ' blockchain developers. ' +
+        'Include a title, introduction, a map of steps (each with description and options), a firstStepId, and conclusion messages for success/failure. ' +
+        'Each option should have id, text, outcome message, isCorrect flag, and optionally a nextStep id. ' +
+        'Structure: title, introduction, steps (object map of step objects), firstStepId, conclusion (object with success and failure messages).';
+
     default:
       return promptPrefix + 
         'Create an interactive challenge about Sui blockchain development for ' + difficultyLevel + ' developers. ' +
@@ -376,9 +427,155 @@ Ensure all JSON syntax is correct with proper commas, braces, and no trailing co
   }
 };
 
-// Get fallback content in case generation fails
+// Get fallback content with multiple options for each challenge type
+const getMultipleFallbackContent = (type: ChallengeType, difficulty: 'easy' | 'medium' | 'hard'): any => {
+  // Get the daily seed to select a consistent fallback for the day
+  const seed = getDailySeed();
+  const seedNum = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  
+  // Log that we're using fallback content
+  
+  
+  // Define multiple fallback options based on challenge type
+  let fallbackOptions: any[] = [];
+  
+  switch (type as AnyHistoricalChallengeType) {
+    case 'math_puzzle':
+      
+      fallbackOptions = [
+        // Option 1: Validator voting power
+        {
+          question: "In a Sui blockchain, a validator set has 10 validators with different voting powers. If a transaction requires at least 2/3 of the total voting power to reach consensus, and the voting powers (in stake units) are distributed as [100, 90, 80, 70, 60, 50, 40, 30, 20, 10], what is the minimum number of validators needed to reach consensus?",
+          equation: "\\sum_{i=1}^{n} VP_i \\geq \\frac{2}{3} \\cdot \\sum_{i=1}^{10} VP_i",
+          context: "In Sui blockchain, consensus requires at least 2/3 of the total voting power. The voting power of each validator is proportional to their staked SUI tokens. Understanding the minimum validator set needed for consensus is crucial for security analysis.",
+          hint1: "First calculate the total voting power across all validators, then find the threshold needed for consensus (2/3 of total).",
+          hint2: "Sort the validators by voting power (highest first) and add them up until you reach or exceed the threshold.",
+          solution: "The total voting power is 100+90+80+70+60+50+40+30+20+10 = 550. The 2/3 threshold is 550 × (2/3) = 366.67. Starting with the highest voting powers: 100+90+80+70 = 340, which is less than the threshold. Adding the next validator: 340+60 = 400, which exceeds the threshold. Therefore, 5 validators are needed.",
+          answer: "5"
+        },
+        // Option 2: Gas calculation
+        {
+          question: "A Sui Move transaction consumes gas based on computation, storage, and IO operations. If a transaction performs 5 computation units (10 gas each), 3 storage writes (20 gas each), and 2 IO operations (15 gas each), and the gas price is set at 0.5 SUI per 1000 gas units, how much will the transaction cost in SUI?",
+          equation: "Cost = (Computation + Storage + IO) × GasPrice",
+          context: "Gas fees in Sui blockchain compensate validators for the computational resources used to process transactions. Understanding gas calculations helps developers optimize their smart contracts for cost efficiency.",
+          hint1: "Calculate the total gas units by summing all operations: computation (5 × 10), storage (3 × 20), and IO (2 × 15).",
+          hint2: "Convert the total gas units to SUI by multiplying by the gas price (0.5 SUI per 1000 gas units).",
+          solution: "Computation: 5 × 10 = 50 gas units\nStorage: 3 × 20 = 60 gas units\nIO: 2 × 15 = 30 gas units\nTotal gas: 50 + 60 + 30 = 140 gas units\nCost in SUI: 140 × (0.5/1000) = 0.07 SUI",
+          answer: "0.07"
+        },
+        // Option 3: Merkle tree
+        {
+          question: "In a Merkle tree used for blockchain transaction verification, how many leaf nodes are needed to construct a balanced binary Merkle tree of height 4 (where the leaf nodes are at level 0)?",
+          equation: "Leaf nodes = 2^h (where h is the height)",
+          context: "Merkle trees are fundamental data structures in blockchains, allowing efficient verification of large data sets. In Sui, they're used for transaction verification and state proofs.",
+          hint1: "In a balanced binary tree, each level l has 2^l nodes, with leaf nodes at level 0.",
+          hint2: "For a tree of height h, the number of leaf nodes is 2^h.",
+          solution: "In a binary Merkle tree of height 4, the leaf nodes are at level 0, and there are 2^4 = 16 leaf nodes. This allows the construction of a balanced tree with 8 nodes at level 1, 4 nodes at level 2, 2 nodes at level 3, and 1 root node at level 4.",
+          answer: "16"
+        }
+      ];
+      break;
+      
+    case 'security_audit':
+      fallbackOptions = [
+        // Option 1: Basic token with access control issues
+        {
+          scenario: "This smart contract implements a basic token with transfer functionality",
+          contractCode: "module example::basic_token {\n    use sui::transfer;\n    use sui::object::{Self, UID};\n    use sui::tx_context::{Self, TxContext};\n\n    struct Token has key {\n        id: UID,\n        amount: u64,\n        owner: address\n    }\n\n    struct TokenCap has key {\n        id: UID\n    }\n\n    fun init(ctx: &mut TxContext) {\n        transfer::transfer(\n            TokenCap { id: object::new(ctx) },\n            tx_context::sender(ctx)\n        )\n    }\n\n    public fun create_token(amount: u64, recipient: address, ctx: &mut TxContext) {\n        let token = Token {\n            id: object::new(ctx),\n            amount,\n            owner: recipient\n        };\n        transfer::transfer(token, recipient);\n    }\n\n    public fun transfer_token(token: Token, recipient: address) {\n        token.owner = recipient;\n        transfer::transfer(token, recipient);\n    }\n}",
+          securityIssues: [
+            {
+              severity: "high",
+              description: "Anyone can create tokens without authorization",
+              location: "create_token function has no access control",
+              recommendation: "Add a TokenCap parameter to the create_token function to ensure only the capability holder can create tokens"
+            },
+            {
+              severity: "medium",
+              description: "Redundant owner field",
+              location: "Token struct includes an owner field",
+              recommendation: "Remove the owner field as Sui already tracks object ownership"
+            }
+          ]
+        },
+        // Option 2: NFT marketplace with vulnerabilities
+        {
+          scenario: "This smart contract implements a simple NFT marketplace where users can list and buy NFTs",
+          contractCode: "module example::nft_marketplace {\n    use sui::transfer;\n    use sui::coin::{Self, Coin};\n    use sui::sui::SUI;\n    use sui::object::{Self, ID, UID};\n    use sui::tx_context::{Self, TxContext};\n    use std::option::{Self, Option};\n\n    struct Listing has key, store {\n        id: UID,\n        nft_id: ID,\n        price: u64,\n        owner: address\n    }\n\n    struct NFT has key, store {\n        id: UID,\n        name: std::string::String,\n        description: std::string::String,\n        url: std::string::String\n    }\n\n    public fun list_nft(nft: NFT, price: u64, ctx: &mut TxContext) {\n        let nft_id = object::id(&nft);\n        let listing = Listing {\n            id: object::new(ctx),\n            nft_id,\n            price,\n            owner: tx_context::sender(ctx)\n        };\n        transfer::public_share_object(listing);\n        transfer::public_share_object(nft);\n    }\n\n    public fun buy_nft(listing: &mut Listing, nft: NFT, payment: Coin<SUI>, ctx: &mut TxContext) {\n        assert!(object::id(&nft) == listing.nft_id, 0);\n        assert!(coin::value(&payment) >= listing.price, 1);\n        \n        transfer::public_transfer(nft, tx_context::sender(ctx));\n        transfer::public_transfer(payment, listing.owner);\n    }\n}",
+          securityIssues: [
+            {
+              severity: "high",
+              description: "No validation that NFT matches listing when buying",
+              location: "buy_nft function assertion",
+              recommendation: "Add proper validation to ensure the NFT being purchased matches the listing"
+            },
+            {
+              severity: "high",
+              description: "Missing refund for excess payment",
+              location: "buy_nft function",
+              recommendation: "If payment exceeds the price, the excess should be refunded to the buyer"
+            },
+            {
+              severity: "medium",
+              description: "NFTs become shared objects when listed",
+              location: "list_nft function",
+              recommendation: "Use a proper escrow pattern instead of making NFTs shared objects"
+            }
+          ]
+        },
+        // Option 3: Vulnerable staking contract
+        {
+          scenario: "This smart contract implements a staking mechanism for earning rewards",
+          contractCode: "module example::staking {\n    use sui::balance::{Self, Balance};\n    use sui::coin::{Self, Coin};\n    use sui::object::{Self, UID};\n    use sui::sui::SUI;\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n    use std::vector;\n\n    struct StakingPool has key {\n        id: UID,\n        staked_coins: Balance<SUI>,\n        reward_pool: Balance<SUI>,\n        stakers: vector<address>,\n        reward_rate: u64\n    }\n\n    struct StakeReceipt has key {\n        id: UID,\n        amount: u64,\n        timestamp: u64,\n        owner: address\n    }\n\n    public fun stake(pool: &mut StakingPool, coin: Coin<SUI>, ctx: &mut TxContext) {\n        let amount = coin::value(&coin);\n        let balance = coin::into_balance(coin);\n        balance::join(&mut pool.staked_coins, balance);\n        \n        vector::push_back(&mut pool.stakers, tx_context::sender(ctx));\n        \n        let receipt = StakeReceipt {\n            id: object::new(ctx),\n            amount,\n            timestamp: tx_context::epoch(ctx),\n            owner: tx_context::sender(ctx)\n        };\n        \n        transfer::transfer(receipt, tx_context::sender(ctx));\n    }\n\n    public fun unstake(pool: &mut StakingPool, receipt: StakeReceipt, ctx: &mut TxContext) {\n        let StakeReceipt { id, amount, timestamp, owner } = receipt;\n        object::delete(id);\n        \n        let current_epoch = tx_context::epoch(ctx);\n        let epochs_staked = current_epoch - timestamp;\n        let reward = (amount * pool.reward_rate * epochs_staked) / 10000;\n        \n        let principal = balance::split(&mut pool.staked_coins, amount);\n        let rewards = balance::split(&mut pool.reward_pool, reward);\n        \n        balance::join(&mut principal, rewards);\n        let return_coin = coin::from_balance(principal, ctx);\n        \n        transfer::transfer(return_coin, owner);\n    }\n}",
+          securityIssues: [
+            {
+              severity: "critical",
+              description: "No verification of receipt ownership",
+              location: "unstake function",
+              recommendation: "Verify that tx_context::sender(ctx) matches the receipt.owner to prevent theft of staked funds"
+            },
+            {
+              severity: "high",
+              description: "Possible arithmetic overflow",
+              location: "reward calculation in unstake function",
+              recommendation: "Use checked arithmetic or ensure the reward calculation cannot overflow"
+            },
+            {
+              severity: "high",
+              description: "No validation of reward pool balance",
+              location: "unstake function",
+              recommendation: "Check if the reward pool has sufficient balance before calculating rewards"
+            },
+            {
+              severity: "medium",
+              description: "Stakers vector grows unbounded",
+              location: "stake function",
+              recommendation: "Use a more efficient data structure or remove addresses when unstaking"
+            }
+          ]
+        }
+      ];
+      break;
+      
+    // Add more challenge types here with multiple fallback options...
+      
+    default:
+      // For other challenge types, just use the single fallback content
+      fallbackOptions = [getFallbackContent(type, difficulty)];
+      break;
+  }
+  
+  // Select one fallback option based on the daily seed
+  const selectedIndex = seedNum % fallbackOptions.length;
+  const selectedFallback = fallbackOptions[selectedIndex];
+  
+  
+  
+  return selectedFallback;
+};
+
+// Keep the original getFallbackContent function as a fallback for challenge types without multiple options
 const getFallbackContent = (type: ChallengeType, difficulty: 'easy' | 'medium' | 'hard'): any => {
-  switch (type) {
+  switch (type as AnyHistoricalChallengeType) {
     case 'code_puzzle':
       return {
         challenge: "Create a function to transfer an NFT between two addresses",
@@ -427,6 +624,188 @@ const getFallbackContent = (type: ChallengeType, difficulty: 'easy' | 'medium' |
         practicalExample: "A game item NFT might be address-owned, a marketplace might be shared, and game rules might be immutable"
       };
     
+    case 'security_audit':
+      return {
+        scenario: "This smart contract implements a basic token with transfer functionality",
+        contractCode: "module example::basic_token {\n    use sui::transfer;\n    use sui::object::{Self, UID};\n    use sui::tx_context::{Self, TxContext};\n\n    struct Token has key {\n        id: UID,\n        amount: u64,\n        owner: address\n    }\n\n    struct TokenCap has key {\n        id: UID\n    }\n\n    fun init(ctx: &mut TxContext) {\n        transfer::transfer(\n            TokenCap { id: object::new(ctx) },\n            tx_context::sender(ctx)\n        )\n    }\n\n    public fun create_token(amount: u64, recipient: address, ctx: &mut TxContext) {\n        let token = Token {\n            id: object::new(ctx),\n            amount,\n            owner: recipient\n        };\n        transfer::transfer(token, recipient);\n    }\n\n    public fun transfer_token(token: Token, recipient: address) {\n        token.owner = recipient;\n        transfer::transfer(token, recipient);\n    }\n}",
+        securityIssues: [
+          {
+            severity: "high",
+            description: "Anyone can create tokens without authorization",
+            location: "create_token function has no access control",
+            recommendation: "Add a TokenCap parameter to the create_token function to ensure only the capability holder can create tokens"
+          },
+          {
+            severity: "medium",
+            description: "Redundant owner field",
+            location: "Token struct includes an owner field",
+            recommendation: "Remove the owner field as Sui already tracks object ownership"
+          }
+        ]
+      };
+
+    case 'optimization':
+      return {
+        scenario: "This smart contract implements a basic counter that can be incremented by anyone",
+        originalCode: "module example::counter {\n    use sui::object::{Self, UID};\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n\n    struct Counter has key {\n        id: UID,\n        value: u64,\n    }\n\n    public fun create(ctx: &mut TxContext) {\n        let counter = Counter {\n            id: object::new(ctx),\n            value: 0,\n        };\n        transfer::share_object(counter);\n    }\n\n    public fun increment(counter: &mut Counter) {\n        let current = counter.value;\n        let new_value = current + 1;\n        counter.value = new_value;\n    }\n\n    public fun get_value(counter: &Counter): u64 {\n        return counter.value;\n    }\n}",
+        optimizationGoals: [
+          "Improve the increment function efficiency",
+          "Reduce unnecessary operations",
+          "Optimize gas usage"
+        ],
+        hints: [
+          "Look for redundant variable assignments",
+          "Consider direct operations instead of intermediate variables"
+        ],
+        sampleSolution: "module example::counter {\n    use sui::object::{Self, UID};\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n\n    struct Counter has key {\n        id: UID,\n        value: u64,\n    }\n\n    public fun create(ctx: &mut TxContext) {\n        transfer::share_object(Counter {\n            id: object::new(ctx),\n            value: 0,\n        });\n    }\n\n    public fun increment(counter: &mut Counter) {\n        counter.value = counter.value + 1;\n    }\n\n    public fun get_value(counter: &Counter): u64 {\n        counter.value\n    }\n}",
+        optimizationPoints: [
+          {
+            description: "Eliminate intermediate variables in increment function",
+            explanation: "The original code uses unnecessary temporary variables. Direct assignment is more efficient."
+          },
+          {
+            description: "Remove explicit return statement in get_value function",
+            explanation: "In Move, the last expression is automatically returned, making the return keyword redundant."
+          },
+          {
+            description: "Inline Counter creation before sharing",
+            explanation: "Creating the object inline reduces one variable assignment, making the code more concise."
+          }
+        ]
+      };
+      
+    case 'defi_scenario':
+      return {
+        title: "Liquidity Pool Investment Decision",
+        introduction: "You are a DeFi investor with 1,000 SUI tokens. You need to make decisions about investing in a new liquidity pool on a decentralized exchange.",
+        steps: {
+          "start": {
+            id: "start",
+            description: "A new DEX has launched on Sui with high APY rewards for early liquidity providers. You have 1,000 SUI tokens. What's your first move?",
+            options: [
+              {
+                id: "option1",
+                text: "Immediately invest all 1,000 SUI tokens to maximize early rewards",
+                outcome: "You've committed all your funds but received the highest tier of early LP rewards. However, you now have zero liquidity for other opportunities.",
+                isCorrect: false,
+                nextStep: "market_change"
+              },
+              {
+                id: "option2",
+                text: "Research the protocol's security audits and team background first",
+                outcome: "Smart move! You discover the protocol has passed three security audits and the team is doxxed with strong credentials.",
+                isCorrect: true,
+                nextStep: "invest_decision"
+              },
+              {
+                id: "option3",
+                text: "Ignore this opportunity and look for something else",
+                outcome: "You missed a legitimate opportunity due to excessive caution.",
+                isCorrect: false,
+                nextStep: "missed_opportunity"
+              }
+            ]
+          },
+          "invest_decision": {
+            id: "invest_decision",
+            description: "Now that you've verified the protocol's security, how much will you invest?",
+            options: [
+              {
+                id: "option1",
+                text: "Invest 50% (500 SUI) as a balanced approach",
+                outcome: "Good choice! You've balanced risk and opportunity by committing a significant amount while maintaining liquidity.",
+                isCorrect: true,
+                nextStep: "market_change"
+              },
+              {
+                id: "option2",
+                text: "Invest 10% (100 SUI) to test the waters",
+                outcome: "A conservative approach that limits your exposure but also your potential gains.",
+                isCorrect: false,
+                nextStep: "market_change"
+              },
+              {
+                id: "option3",
+                text: "Invest 90% (900 SUI) to maximize returns",
+                outcome: "You've committed most of your funds which increases your exposure to this single protocol.",
+                isCorrect: false,
+                nextStep: "market_change"
+              }
+            ]
+          },
+          "market_change": {
+            id: "market_change",
+            description: "Two weeks later, the market experiences volatility and SUI drops 20% in value. The pool is showing impermanent loss. What do you do?",
+            options: [
+              {
+                id: "option1",
+                text: "Panic and withdraw all your liquidity immediately",
+                outcome: "You've realized your impermanent loss and missed the recovery that followed.",
+                isCorrect: false,
+                nextStep: null
+              },
+              {
+                id: "option2",
+                text: "Hold your position and wait for the market to stabilize",
+                outcome: "Patient move! The market eventually recovers and your impermanent loss is reduced.",
+                isCorrect: true,
+                nextStep: null
+              },
+              {
+                id: "option3",
+                text: "Add more liquidity to dollar-cost average your position",
+                outcome: "Bold move! While risky, this strategy paid off as the market recovered, allowing you to acquire more at a discount.",
+                isCorrect: true,
+                nextStep: null
+              }
+            ]
+          },
+          "missed_opportunity": {
+            id: "missed_opportunity",
+            description: "The protocol turns out to be legitimate and early investors earned 40% APY. You see another opportunity with similar characteristics. What now?",
+            options: [
+              {
+                id: "option1",
+                text: "Jump in immediately to avoid missing out again",
+                outcome: "Without proper research, you've invested in a protocol that later experienced a security breach.",
+                isCorrect: false,
+                nextStep: null
+              },
+              {
+                id: "option2",
+                text: "Stick to your cautious approach and skip this one too",
+                outcome: "You've missed another legitimate opportunity due to excessive caution.",
+                isCorrect: false,
+                nextStep: null
+              },
+              {
+                id: "option3",
+                text: "Conduct thorough research before making a decision",
+                outcome: "Smart approach! Your research reveals this is another solid opportunity and you're able to participate with confidence.",
+                isCorrect: true,
+                nextStep: null
+              }
+            ]
+          }
+        },
+        firstStepId: "start",
+        conclusion: {
+          success: "Congratulations! Your careful research and balanced investment approach has paid off. You've successfully navigated the DeFi liquidity pool opportunity while managing risk appropriately.",
+          failure: "You've learned some valuable lessons about DeFi investing. Remember to always conduct thorough research, maintain liquidity for opportunities, and avoid emotional decisions during market volatility."
+        }
+      };
+      
+    case 'math_puzzle':
+      return {
+        question: "In a Sui blockchain, a validator set has 10 validators with different voting powers. If a transaction requires at least 2/3 of the total voting power to reach consensus, and the voting powers (in stake units) are distributed as [100, 90, 80, 70, 60, 50, 40, 30, 20, 10], what is the minimum number of validators needed to reach consensus?",
+        equation: "\\sum_{i=1}^{n} VP_i \\geq \\frac{2}{3} \\cdot \\sum_{i=1}^{10} VP_i",
+        context: "In Sui blockchain, consensus requires at least 2/3 of the total voting power. The voting power of each validator is proportional to their staked SUI tokens. Understanding the minimum validator set needed for consensus is crucial for security analysis.",
+        hint1: "First calculate the total voting power across all validators, then find the threshold needed for consensus (2/3 of total).",
+        hint2: "Sort the validators by voting power (highest first) and add them up until you reach or exceed the threshold.",
+        solution: "The total voting power is 100+90+80+70+60+50+40+30+20+10 = 550. The 2/3 threshold is 550 × (2/3) = 366.67. Starting with the highest voting powers: 100+90+80+70 = 340, which is less than the threshold. Adding the next validator: 340+60 = 400, which exceeds the threshold. Therefore, 5 validators are needed.",
+        answer: "5"
+      };
+    
     default:
       return {
         title: "Sui Blockchain Challenge",
@@ -440,18 +819,69 @@ const getFallbackContent = (type: ChallengeType, difficulty: 'easy' | 'medium' |
 // Check if the challenge content is valid
 const isValidChallengeContent = (content: any, type: ChallengeType): boolean => {
   try {
-    switch (type) {
-      case 'code_puzzle':
+    if (!content || typeof content !== 'object') {
+      
+      return false;
+    }
+
+    let isValid = true;
+    let missingFields: string[] = [];
+
+    switch (type as AnyHistoricalChallengeType) {
+      case 'math_puzzle':
+        // Required fields for math_puzzle
+        const requiredMathFields = ['question', 'context', 'hint1', 'hint2', 'solution', 'answer'];
+        requiredMathFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        // Special check for math_puzzle: ensure it's not a code sample or other challenge type
+        if (content.solution && typeof content.solution === 'string') {
+          const solutionText = content.solution.toLowerCase();
+          // If solution contains code markers or code-related keywords, it's likely the wrong type
+          if (solutionText.includes('```') || 
+              solutionText.includes('module ') || 
+              solutionText.includes('struct ') || 
+              solutionText.includes('function ')) {
+            isValid = false;
+            
+          }
+        }
+        
+        if (!isValid) {
+          
+          
+        }
+        
         return (
-          typeof content === 'object' &&
-          typeof content.challenge === 'string' &&
-          typeof content.codeTemplate === 'string' &&
-          typeof content.solution === 'string'
+          isValid &&
+          typeof content.question === 'string' &&
+          typeof content.context === 'string' &&
+          typeof content.hint1 === 'string' &&
+          typeof content.hint2 === 'string' &&
+          typeof content.solution === 'string' &&
+          (typeof content.answer === 'string' || typeof content.answer === 'number')
         );
       
       case 'quiz':
+        // Required fields for quiz
+        const requiredQuizFields = ['question', 'options', 'correctAnswer', 'explanation'];
+        requiredQuizFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        if (!isValid) {
+          
+        }
+        
         return (
-          typeof content === 'object' &&
+          isValid &&
           typeof content.question === 'string' &&
           Array.isArray(content.options) &&
           typeof content.correctAnswer === 'number' &&
@@ -459,16 +889,84 @@ const isValidChallengeContent = (content: any, type: ChallengeType): boolean => 
         );
       
       case 'bug_hunt':
+        // Required fields for bug_hunt
+        const requiredBugHuntFields = ['scenario', 'buggyCode', 'bugs'];
+        requiredBugHuntFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        if (!isValid) {
+          
+        }
+        
         return (
-          typeof content === 'object' &&
+          isValid &&
           typeof content.scenario === 'string' &&
           typeof content.buggyCode === 'string' &&
           Array.isArray(content.bugs)
         );
       
-      case 'concept_review':
+      case 'security_audit':
+        // Required fields for security_audit
+        const requiredSecurityFields = ['scenario', 'contractCode', 'securityIssues'];
+        requiredSecurityFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        if (!isValid) {
+          
+        }
+        
         return (
-          typeof content === 'object' &&
+          isValid &&
+          typeof content.scenario === 'string' &&
+          typeof content.contractCode === 'string' &&
+          Array.isArray(content.securityIssues)
+        );
+        
+      case 'code_puzzle':
+        // Required fields for code_puzzle
+        const requiredCodeFields = ['challenge', 'codeTemplate', 'solution'];
+        requiredCodeFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        if (!isValid) {
+          
+        }
+        
+        return (
+          isValid &&
+          typeof content.challenge === 'string' &&
+          typeof content.codeTemplate === 'string' &&
+          typeof content.solution === 'string'
+        );
+      
+      case 'concept_review':
+        // Required fields for concept_review
+        const requiredConceptFields = ['concept', 'description', 'questionPrompt', 'keyPoints', 'practicalExample'];
+        requiredConceptFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        if (!isValid) {
+          
+        }
+        
+        return (
+          isValid &&
           typeof content.concept === 'string' &&
           typeof content.description === 'string' &&
           typeof content.questionPrompt === 'string' &&
@@ -476,11 +974,60 @@ const isValidChallengeContent = (content: any, type: ChallengeType): boolean => 
           typeof content.practicalExample === 'string'
         );
       
+      case 'optimization':
+        // Required fields for optimization
+        const requiredOptFields = ['scenario', 'originalCode', 'optimizationGoals', 'hints', 'sampleSolution', 'optimizationPoints'];
+        requiredOptFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        if (!isValid) {
+          
+        }
+        
+        return (
+          isValid &&
+          typeof content.scenario === 'string' &&
+          typeof content.originalCode === 'string' &&
+          Array.isArray(content.optimizationGoals) &&
+          Array.isArray(content.hints) &&
+          typeof content.sampleSolution === 'string' &&
+          Array.isArray(content.optimizationPoints)
+        );
+        
+      case 'defi_scenario':
+        // Required fields for defi_scenario
+        const requiredDefiFields = ['title', 'introduction', 'steps', 'firstStepId', 'conclusion'];
+        requiredDefiFields.forEach(field => {
+          if (!content[field]) {
+            isValid = false;
+            missingFields.push(field);
+          }
+        });
+        
+        if (!isValid) {
+          
+        }
+        
+        return (
+          isValid &&
+          typeof content.title === 'string' &&
+          typeof content.introduction === 'string' &&
+          typeof content.steps === 'object' &&
+          typeof content.firstStepId === 'string' &&
+          typeof content.conclusion === 'object' &&
+          typeof content.conclusion.success === 'string' &&
+          typeof content.conclusion.failure === 'string'
+        );
+      
       default:
         return true; // For other types, just ensure we have an object
     }
   } catch (error) {
-    console.error(`Error validating ${type} challenge content:`, error);
+    
     return false;
   }
 };
@@ -517,7 +1064,7 @@ export const ensureDailyChallengesExist = async (walletAddress: string): Promise
     // No challenges for today, generate new ones
     return await generateDailyChallenges(walletAddress);
   } catch (error) {
-    console.error("Error ensuring daily challenges exist:", error);
+    
     throw error;
   }
 };
@@ -565,12 +1112,12 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
               break;
             } catch (error) {
               retryCount++;
-              console.error(`Error generating challenge (attempt ${retryCount}/${maxRetries}):`, error);
+              
               
               if (retryCount >= maxRetries) {
                 // All retries failed, use fallback content
-                console.warn(`Using fallback content for ${type} challenge after ${maxRetries} failed attempts`);
-                content = getFallbackContent(type, difficulty);
+                
+                content = getMultipleFallbackContent(type, difficulty);
               } else {
                 // Wait a bit before retrying
                 await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
@@ -596,13 +1143,13 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
           challenges.push(challenge);
         }
       } catch (error) {
-        console.error("Failed to generate challenges with Gemini:", error);
+        
         useHardcodedChallenges = true;
       }
       
       // If we failed to generate challenges with Gemini, use hardcoded ones
       if (useHardcodedChallenges || challenges.length < 3) {
-        console.log("Using hardcoded fallback challenges");
+        
         challenges = getFallbackChallenges();
       }
       
@@ -639,7 +1186,7 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
     
     return challenges;
   } catch (error) {
-    console.error("Error generating daily challenges:", error);
+    
     // Return fallback challenges even if storing to Firestore fails
     return getFallbackChallenges();
   }
@@ -647,7 +1194,7 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
 
 // Helper functions for challenge creation
 const getChallengeTitle = (type: ChallengeType, difficulty: 'easy' | 'medium' | 'hard'): string => {
-  const titles: Record<ChallengeType, string[]> = {
+  const titles: Record<string, string[]> = {
     code_puzzle: ['Move Code Puzzle', 'Move Programming Challenge', 'Sui Contract Builder'],
     quiz: ['Sui Knowledge Test', 'Blockchain Quiz', 'Sui Concepts Quiz'],
     bug_hunt: ['Debug the Contract', 'Bug Hunter Challenge', 'Find the Bug'],
@@ -672,7 +1219,7 @@ const getChallengeTitle = (type: ChallengeType, difficulty: 'easy' | 'medium' | 
 };
 
 const getChallengeDescription = (type: ChallengeType, difficulty: 'easy' | 'medium' | 'hard'): string => {
-  switch (type) {
+  switch (type as AnyHistoricalChallengeType) {
     case 'code_puzzle':
       return "Solve this Sui Move coding puzzle to demonstrate your skills in blockchain programming.";
     case 'quiz':
@@ -752,7 +1299,7 @@ export const updateChallengeProgress = async (
       });
     }
   } catch (error) {
-    console.error("Error updating challenge progress:", error);
+    
     throw error;
   }
 };
@@ -763,7 +1310,7 @@ export const completeChallengeAndClaimRewards = async (
   walletAddress: string
 ): Promise<{ success: boolean, reward: number, xpReward: number }> => {
   try {
-    console.log(`Claiming rewards for challenge ${challengeId} by wallet ${walletAddress}`);
+    
     
     // Find the user's challenge
     const userChallengesRef = collection(db, 'dailyChallenges');
@@ -776,7 +1323,7 @@ export const completeChallengeAndClaimRewards = async (
     const challengesSnapshot = await getDocs(challengesQuery);
     
     if (challengesSnapshot.empty) {
-      console.error(`Challenge ${challengeId} not found for user ${walletAddress}`);
+      
       throw new Error(`Challenge ${challengeId} not found for user ${walletAddress}`);
     }
     
@@ -784,17 +1331,17 @@ export const completeChallengeAndClaimRewards = async (
     const challengeData = challengeDoc.data() as DailyChallenge;
     
     if (!challengeData.completed) {
-      console.error(`Challenge ${challengeId} is not completed yet`);
+      
       throw new Error(`Challenge ${challengeId} is not completed yet`);
     }
     
     // Check if rewards already claimed
     if (challengeData.rewardClaimed) {
-      console.error(`Rewards for challenge ${challengeId} already claimed`);
+      
       throw new Error(`Rewards for challenge ${challengeId} already claimed`);
     }
     
-    console.log(`Processing rewards: ${challengeData.tokenReward} SUI and ${challengeData.xpReward} XP`);
+    
     
     // Mark as rewards claimed
     await updateDoc(challengeDoc.ref, {
@@ -802,7 +1349,7 @@ export const completeChallengeAndClaimRewards = async (
       rewardClaimedAt: serverTimestamp()
     });
     
-    // Update user's SUI tokens
+    // Update user's SUI tokens in the database
     await updateDoc(doc(db, 'learningProgress', walletAddress), {
       suiTokens: increment(challengeData.tokenReward),
       totalSuiEarned: increment(challengeData.tokenReward),
@@ -811,7 +1358,21 @@ export const completeChallengeAndClaimRewards = async (
       lastUpdated: serverTimestamp()
     });
     
-    console.log(`Updated user stats with ${challengeData.tokenReward} SUI and ${challengeData.xpReward} XP`);
+    // Actually transfer SUI tokens to user's wallet
+    const paymentResult = await sendSuiReward(
+      walletAddress, 
+      challengeData.suiReward, 
+      `Daily Challenge Reward: ${challengeData.title}`
+    );
+    
+    if (!paymentResult.success) {
+      
+      // Still continue as the database was updated, but log the error
+    } else {
+      
+    }
+    
+    
     
     // Record the transaction
     await setDoc(doc(collection(db, 'transactions')), {
@@ -821,6 +1382,7 @@ export const completeChallengeAndClaimRewards = async (
       reason: `Daily Challenge Reward: ${challengeData.title}`,
       type: 'challenge_reward',
       challengeId,
+      suiTxDigest: paymentResult.success ? paymentResult.txDigest : null,
       timestamp: serverTimestamp()
     });
     
@@ -830,7 +1392,7 @@ export const completeChallengeAndClaimRewards = async (
       xpReward: challengeData.xpReward
     };
   } catch (error) {
-    console.error("Error completing challenge and claiming rewards:", error);
+    
     throw error;
   }
 };
@@ -842,7 +1404,7 @@ export const getUserDailyChallenges = async (walletAddress: string): Promise<Dai
     try {
       await ensureDailyChallengesExist(walletAddress);
     } catch (error) {
-      console.error("Error creating daily challenges:", error);
+      
       // Return empty challenges instead of failing completely
       return [];
     }
@@ -862,22 +1424,56 @@ export const getUserDailyChallenges = async (walletAddress: string): Promise<Dai
     const challengesSnapshot = await getDocs(challengesQuery);
     
     const challenges: DailyChallenge[] = [];
+    
     challengesSnapshot.forEach(doc => {
       try {
         const data = doc.data();
-        challenges.push({ 
+        const challenge = { 
           id: doc.id, 
           ...data 
-        } as DailyChallenge);
+        } as DailyChallenge;
+        
+        // Check if challenge type is valid, replace if not
+        if (!isValidChallengeType(challenge.type)) {
+          
+          
+          // Choose a replacement type based on the challenge id for consistency
+          const idSeed = Array.from(challenge.id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+          const newType = getReplacementChallengeType(idSeed);
+          
+          // Create a replacement challenge
+          const replacementChallenge: DailyChallenge = {
+            ...challenge,
+            type: newType,
+            title: getChallengeTitle(newType, challenge.difficulty),
+            description: getChallengeDescription(newType, challenge.difficulty),
+            content: getFallbackContent(newType, challenge.difficulty)
+          };
+          
+          challenges.push(replacementChallenge);
+          
+          // Update the challenge in Firestore with the new type
+          updateDoc(doc.ref, {
+            type: newType,
+            title: replacementChallenge.title,
+            description: replacementChallenge.description,
+            content: replacementChallenge.content,
+            lastUpdated: serverTimestamp()
+          }).catch(error => {
+            
+          });
+        } else {
+          challenges.push(challenge);
+        }
       } catch (docError) {
-        console.error("Error parsing challenge document:", docError);
+        
         // Skip this document but continue with others
       }
     });
     
     return challenges;
   } catch (error) {
-    console.error("Error getting user daily challenges:", error);
+    
     // Return empty array instead of throwing to prevent UI breakage
     return [];
   }

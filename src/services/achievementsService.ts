@@ -333,7 +333,7 @@ export const getUserAchievements = async (walletAddress: string) => {
       locked: lockedAchievements
     };
   } catch (error) {
-    console.error('Error getting user achievements:', error);
+    
     throw error;
   }
 };
@@ -349,7 +349,7 @@ export const hasAchievement = async (walletAddress: string, achievementId: strin
     
     return achievementDoc.exists();
   } catch (error) {
-    console.error('Error checking achievement:', error);
+    
     return false;
   }
 };
@@ -417,7 +417,7 @@ export const unlockAchievement = async (
       achievement
     };
   } catch (error) {
-    console.error('Error unlocking achievement:', error);
+    
     return { success: false };
   }
 };
@@ -538,7 +538,7 @@ export const checkAchievements = async (walletAddress: string): Promise<Achievem
     
     return unlockedAchievements;
   } catch (error) {
-    console.error('Error checking achievements:', error);
+    
     return [];
   }
 };
@@ -575,7 +575,7 @@ export const checkMysteryBoxPurchaseAchievement = async (
     
     return null;
   } catch (error) {
-    console.error('Error checking mystery box purchase achievement:', error);
+    
     return null;
   }
 };
@@ -594,7 +594,7 @@ export const checkPerfectQuizAchievement = async (walletAddress: string, score: 
     
     return null;
   } catch (error) {
-    console.error('Error checking perfect quiz achievement:', error);
+    
     return null;
   }
 };
@@ -618,7 +618,7 @@ export const checkFlashcardMasterAchievement = async (
     
     return null;
   } catch (error) {
-    console.error('Error checking flashcard master achievement:', error);
+    
     return null;
   }
 };
@@ -640,7 +640,7 @@ export const checkAlienConquerorAchievement = async (
     
     return null;
   } catch (error) {
-    console.error('Error checking alien conqueror achievement:', error);
+    
     return null;
   }
 };
@@ -680,7 +680,7 @@ export const checkLuckyDropAchievement = async (
     
     return null;
   } catch (error) {
-    console.error('Error checking lucky drop achievement:', error);
+    
     return null;
   }
 }; 

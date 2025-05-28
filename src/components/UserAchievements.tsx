@@ -58,7 +58,7 @@ const UserAchievements: React.FC<UserAchievementsProps> = ({ walletAddress }) =>
         setLockedAchievements(locked);
         setLoading(false);
       } catch (err) {
-        console.error('Error fetching achievements:', err);
+        
         setError('Failed to load achievements');
         setLoading(false);
       }

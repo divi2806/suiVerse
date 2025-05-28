@@ -73,7 +73,7 @@ const Rewards = () => {
           }
         }
       } catch (error) {
-        console.error('Error loading claimed rewards:', error);
+        
       }
     };
     
@@ -307,9 +307,9 @@ const Rewards = () => {
             });
           }
           
-          console.log(`Added ${boxType} mystery box to inventory`);
+          
         } catch (error) {
-          console.error('Error updating inventory:', error);
+          
           // Continue execution even if inventory update fails
         }
       }
@@ -341,7 +341,7 @@ const Rewards = () => {
       });
       
     } catch (error) {
-      console.error('Error claiming reward:', error);
+      
       toast({
         title: "Error",
         description: "Failed to claim streak reward. Please try again.",

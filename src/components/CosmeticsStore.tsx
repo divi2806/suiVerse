@@ -349,7 +349,7 @@ const CosmeticsStore: React.FC<CosmeticsStoreProps> = ({ walletAddress, onPurcha
         });
       }
     } catch (error) {
-      console.error("Error during purchase:", error);
+      
       toast({
         title: "Purchase Failed",
         description: "There was an error processing your payment. Please try again.",
@@ -397,7 +397,7 @@ const CosmeticsStore: React.FC<CosmeticsStoreProps> = ({ walletAddress, onPurcha
       // Mark the item as unlocked in the local state
       markCosmeticAsUnlocked(item.id);
     } catch (error) {
-      console.error("Error adding cosmetic to collection:", error);
+      
       throw error;
     }
   };

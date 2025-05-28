@@ -114,7 +114,7 @@ const Settings = () => {
           // Other settings are already initialized with defaults
         }
       } catch (error) {
-        console.error('Error loading settings:', error);
+        
         toast({
           title: "Error",
           description: "Failed to load settings",
@@ -195,7 +195,7 @@ const Settings = () => {
         duration: 3000,
       });
     } catch (error) {
-      console.error('Error saving settings:', error);
+      
       toast({
         title: "Error",
         description: "Failed to save settings",
@@ -265,7 +265,7 @@ const Settings = () => {
       // Close dialog
       setShowDeleteDialog(false);
     } catch (error) {
-      console.error('Error deleting account:', error);
+      
       toast({
         title: "Error",
         description: "Failed to delete account",
@@ -289,8 +289,8 @@ const Settings = () => {
     suiTokens: userData?.suiTokens || 0
   };
   
-  console.log('Settings - userData from context:', userData);
-  console.log('Settings - userStats:', userStats);
+  
+  
 
   return (
     <div className="relative min-h-screen">

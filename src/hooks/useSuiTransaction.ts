@@ -23,7 +23,7 @@ export function useSuiTransaction() {
       setIsLoading(false);
       return result;
     } catch (error) {
-      console.error('Error fetching transaction details:', error);
+      
       setError('Error fetching transaction details');
       setIsLoading(false);
       return null;

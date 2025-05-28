@@ -6,10 +6,19 @@ import { toast } from "@/components/ui/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent } from "@/components/ui/card";
+import { DailyChallenge } from '@/services/dailyChallengesService';
+
+interface ConceptReviewContent {
+  concept: string;
+  description: string;
+  questionPrompt: string;
+  keyPoints: string[];
+  practicalExample: string;
+}
 
 interface ConceptReviewChallengeProps {
-  challenge: any;
-  onComplete: (score: number) => void;
+  challenge: DailyChallenge;
+  onComplete: (score: number, isCorrect?: boolean) => void;
   onCancel: () => void;
 }
 
@@ -18,6 +27,9 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
   onComplete, 
   onCancel 
 }) => {
+  // Extract content from challenge
+  const content = challenge.content as ConceptReviewContent;
+  
   const [answer, setAnswer] = useState<string>('');
   const [showKeyPoints, setShowKeyPoints] = useState<boolean>(false);
   const [showExample, setShowExample] = useState<boolean>(false);
@@ -27,8 +39,8 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
   
   // Log challenge content to help with debugging
   useEffect(() => {
-    console.log("ConceptReviewChallenge content:", challenge);
-  }, [challenge]);
+    
+  }, [content]);
   
   // Setup timer
   useEffect(() => {
@@ -77,9 +89,10 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
     setScore(finalScore);
     setSubmitted(true);
     
+    // Consider any submission as correct for concept review
     // Delay completion to show results
     setTimeout(() => {
-      onComplete(finalScore);
+      onComplete(finalScore, true);
     }, 3000);
   };
   
@@ -97,7 +110,7 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
       setScore(25);
       
       setTimeout(() => {
-        onComplete(25);
+        onComplete(25, false);
       }, 2000);
     }
   }, [timeLeft, onComplete, submitted]);
@@ -132,20 +145,20 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
       
       <Card className="bg-card/30 backdrop-blur-sm mb-6 border-primary/20">
         <CardContent className="p-4">
-          <h3 className="text-xl font-medium text-primary mb-2">{challenge.concept}</h3>
-          <p className="mb-4 text-foreground/80">{challenge.description}</p>
+          <h3 className="text-xl font-medium text-primary mb-2">{content.concept}</h3>
+          <p className="mb-4 text-foreground/80">{content.description}</p>
           
           <div className="bg-card/30 backdrop-blur-sm p-4 rounded-lg border border-border/40 mb-4">
             <h4 className="font-medium mb-2 flex items-center">
               <Info className="h-4 w-4 mr-2 text-blue-400" />
               Challenge Question:
             </h4>
-            <p className="text-foreground/90 font-medium">{challenge.questionPrompt}</p>
+            <p className="text-foreground/90 font-medium">{content.questionPrompt}</p>
           </div>
         </CardContent>
       </Card>
       
-      {!submitted && (
+      {!submitted ? (
         <>
           <div className="mb-6">
             <label className="block text-sm font-medium mb-2">Your Answer:</label>
@@ -172,14 +185,14 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
                   </AccordionTrigger>
                   <AccordionContent className="bg-card/10 rounded-lg mt-2 p-3 border border-border/20">
                     <ul className="space-y-2 list-disc pl-5">
-                      {challenge.keyPoints.map((point: string, index: number) => (
+                      {content.keyPoints.map((point: string, index: number) => (
                         <li key={index} className="text-sm">{point}</li>
                       ))}
                     </ul>
                   </AccordionContent>
                 </AccordionItem>
                 
-                <AccordionItem value="example" className="border-none mt-2">
+                <AccordionItem value="example" className="border-none">
                   <AccordionTrigger 
                     onClick={() => setShowExample(true)}
                     className="py-2 px-3 text-sm bg-card/30 rounded-lg hover:bg-card/50 transition-all"
@@ -190,7 +203,7 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="bg-card/10 rounded-lg mt-2 p-3 border border-border/20">
-                    <p className="text-sm">{challenge.practicalExample}</p>
+                    <p className="text-sm">{content.practicalExample}</p>
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
@@ -209,9 +222,7 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
             </Button>
           </div>
         </>
-      )}
-      
-      {submitted && (
+      ) : (
         <motion.div 
           className="mt-6 p-4 rounded-md bg-green-500/20"
           initial={{ opacity: 0, y: 10 }}
@@ -223,9 +234,9 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
           </div>
           
           <div className="mb-4">
-            <p className="font-medium mb-2">Key points to remember about {challenge.concept}:</p>
+            <p className="font-medium mb-2">Key points to remember about {content.concept}:</p>
             <ul className="space-y-2 list-disc pl-5">
-              {challenge.keyPoints.map((point: string, index: number) => (
+              {content.keyPoints.map((point: string, index: number) => (
                 <li key={index}>{point}</li>
               ))}
             </ul>
@@ -233,7 +244,7 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
           
           <div className="mb-4">
             <p className="font-medium mb-2">Practical example:</p>
-            <p>{challenge.practicalExample}</p>
+            <p>{content.practicalExample}</p>
           </div>
           
           <div className="mt-4 pt-4 border-t border-border/40">

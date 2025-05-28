@@ -29,10 +29,10 @@ const Quiz: React.FC<QuizProps> = ({ questions, onComplete }) => {
 
   // Check if questions are valid and set loading timeout
   useEffect(() => {
-    console.log("Quiz component: questions prop updated", questions ? `(${questions.length} questions)` : '(undefined)');
+    
     
     if (questions && questions.length > 0) {
-      console.log("Quiz component: valid questions received");
+      
       setIsLoading(false);
       setLoadingTimeout(false);
       
@@ -42,14 +42,14 @@ const Quiz: React.FC<QuizProps> = ({ questions, onComplete }) => {
         loadingTimeoutRef.current = null;
       }
     } else {
-      console.log("Quiz component: no valid questions yet, setting loading state");
+      
       setIsLoading(true);
       
       // Set a timeout to show retry option if questions don't load within 15 seconds
       if (!loadingTimeoutRef.current) {
-        console.log("Quiz component: setting loading timeout");
+        
         loadingTimeoutRef.current = setTimeout(() => {
-          console.log("Quiz component: loading timeout triggered");
+          
           setLoadingTimeout(true);
         }, 15000); // 15 seconds timeout
       }
@@ -102,12 +102,8 @@ const Quiz: React.FC<QuizProps> = ({ questions, onComplete }) => {
   // Log when we're actually rendering quiz questions - moved outside conditional rendering
   useEffect(() => {
     if (!isLoading && questions && questions.length > 0) {
-      console.log(`%c[Quiz Component] Successfully rendering ${questions.length} questions:`, 'background: #222; color: #00ff00; padding: 2px 4px; border-radius: 2px;');
-      console.log(JSON.stringify(questions.map(q => ({
-        id: q.id,
-        question: q.question?.substring(0, 30) + '...',
-        options: q.options?.length || 0
-      })), null, 2));
+      
+      
     }
   }, [isLoading, questions]);
 

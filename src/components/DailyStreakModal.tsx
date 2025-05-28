@@ -35,20 +35,20 @@ if (typeof window !== 'undefined') {
       const today = new Date().toISOString().split('T')[0];
       const lastShownDay = localStorage.getItem('last_streak_popup_day');
       if (lastShownDay === today) {
-        console.log("DailyStreakModal: Found record of showing popup today already - setting flags");
+        
         hasShownStreakModalThisSession = true;
         window.hasShownStreakModalThisSession = true;
       }
       
       // Also check session storage
       if (sessionStorage.getItem('streak_popup_session') === 'true') {
-        console.log("DailyStreakModal: Found session storage flag for popup - setting flags");
+        
         hasShownStreakModalThisSession = true;
         window.hasShownStreakModalThisSession = true;
       }
     } else {
       // More than 24 hours have passed, reset flags
-      console.log("DailyStreakModal: More than 24 hours since last popup, allowing new popup");
+      
       hasShownStreakModalThisSession = false;
       window.hasShownStreakModalThisSession = false;
       localStorage.removeItem('last_streak_popup_day');
@@ -78,7 +78,7 @@ export const showDailyStreakModal = (details: StreakDetails) => {
   const shouldAllowNewPopup = () => {
     // If it's a login event, always allow
     if (isLoginEvent) {
-      console.log("Login event detected, allowing new popup");
+      
       return true;
     }
     
@@ -89,7 +89,7 @@ export const showDailyStreakModal = (details: StreakDetails) => {
       
       // If it's been over 24 hours, allow a new popup regardless of other flags
       if (hoursSinceLastPopup >= 24) {
-        console.log("Over 24 hours since last streak popup, allowing new popup");
+        
         return true;
       }
     } else {
@@ -115,7 +115,7 @@ export const showDailyStreakModal = (details: StreakDetails) => {
     const today = new Date().toISOString().split('T')[0];
     const lastShownDay = localStorage.getItem('last_streak_popup_day');
     if (lastShownDay === today && !isLoginEvent) {
-      console.log("Already shown streak popup today (date check)");
+      
       return true;
     }
     
@@ -125,7 +125,7 @@ export const showDailyStreakModal = (details: StreakDetails) => {
       const lastTimestamp = parseInt(lastTimestampStr, 10);
       const sixHoursMs = 6 * 60 * 60 * 1000;
       if (Date.now() - lastTimestamp < sixHoursMs) {
-        console.log("Already shown streak popup in last 6 hours");
+        
         return true;
       }
     }
@@ -134,11 +134,11 @@ export const showDailyStreakModal = (details: StreakDetails) => {
   };
   
   if (shouldSkipStreak()) {
-    console.log("Streak modal skipped due to recent display");
+    
     return;
   }
   
-  console.log("Showing streak modal with details:", details);
+  
   
   // Mark as shown - set ALL flags for maximum redundancy
   hasShownStreakModalThisSession = true;
@@ -155,7 +155,7 @@ export const showDailyStreakModal = (details: StreakDetails) => {
   if (globalShowStreakModal) {
     globalShowStreakModal(details);
   } else {
-    console.error("Daily streak modal not initialized yet");
+    
   }
 };
 
@@ -190,7 +190,7 @@ const DailyStreakModal = () => {
       
       // Skip if we've already shown the modal this session and it's not a login event
       if (hasShownStreakModalThisSession && !isLoginEvent) {
-        console.log("DailyStreakModal: Already shown this session, ignoring event");
+        
         return;
       }
       
@@ -208,7 +208,7 @@ const DailyStreakModal = () => {
           newLevel: data.newLevel
         });
       } else {
-        console.log("Skipping streak modal - not a new day");
+        
       }
     };
 

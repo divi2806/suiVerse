@@ -316,7 +316,7 @@ const Profile = () => {
         setAchievements([...unlockedAchievements, ...lockedAchievements]);
         setLoading(prev => ({ ...prev, achievements: false }));
       } catch (error) {
-        console.error('Error fetching achievements:', error);
+        
         setLoading(prev => ({ ...prev, achievements: false }));
       }
     };
@@ -360,7 +360,7 @@ const Profile = () => {
         setActivitiesHistory(activitiesData);
         setLoading(prev => ({ ...prev, activities: false }));
       } catch (error) {
-        console.error('Error fetching activity history:', error);
+        
         setLoading(prev => ({ ...prev, activities: false }));
       }
     };
@@ -394,7 +394,7 @@ const Profile = () => {
           });
         } else {
           const data = progressDoc.data();
-          console.log('Raw progress data from Firestore:', data);
+          
           
           // Get completed modules count
           const completedModules = data.completedModules ? Object.keys(data.completedModules).length : 0;
@@ -409,7 +409,7 @@ const Profile = () => {
               totalXpEarned = Number(data.totalXpEarned) || 0;
             }
           }
-          console.log('Parsed totalXpEarned:', totalXpEarned);
+          
           
           // Format time spent learning
           const timeSpentMinutes = totalXpEarned ? Math.floor(totalXpEarned / 10) : 0; // Estimate time based on XP
@@ -454,7 +454,7 @@ const Profile = () => {
         setModuleCompletions(completionsData.slice(0, 5));
         setLoading(prev => ({ ...prev, stats: false }));
       } catch (error) {
-        console.error('Error fetching learning stats:', error);
+        
         setLoading(prev => ({ ...prev, stats: false }));
       }
     };
@@ -495,7 +495,7 @@ const Profile = () => {
         setUserBadges(badgesData);
         setLoadingBadges(false);
       } catch (error) {
-        console.error('Error fetching user badges:', error);
+        
         setLoadingBadges(false);
       }
     };
@@ -527,14 +527,14 @@ const Profile = () => {
   
   // Log avatar info for debugging
   useEffect(() => {
-    console.log('Profile component - userData?.photoURL:', userData?.photoURL);
-    console.log('Profile component - userStats.avatarSrc:', userStats.avatarSrc);
+    
+    
   }, [userData?.photoURL, userStats.avatarSrc]);
 
   // Refresh user data when profile mounts to ensure we have the latest data
   useEffect(() => {
     if (refreshUserData && walletAddress) {
-      console.log('Profile page: Refreshing user data');
+      
       refreshUserData();
     }
   }, [refreshUserData, walletAddress]);
@@ -556,7 +556,7 @@ const Profile = () => {
       });
       
     } catch (error) {
-      console.error('Error updating avatar:', error);
+      
       toast({
         title: "Update Failed",
         description: "Failed to update your profile avatar. Please try again.",

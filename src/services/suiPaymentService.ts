@@ -18,9 +18,9 @@ try {
   // Use decodeSuiPrivateKey to properly decode the Bech32-encoded private key
   const { secretKey } = decodeSuiPrivateKey(ADMIN_PRIVATE_KEY);
   adminKeypair = Ed25519Keypair.fromSecretKey(secretKey);
-  console.log("Successfully created keypair from admin private key");
+  
 } catch (error) {
-  console.error("Failed to create keypair from provided private key:", error);
+  
   // Fallback to a hex key for development purposes only
   try {
     const fallbackKey = 'f1b9914802d3c0af95e1f1c80efede58de5273764b46dc49b3ba91f174a2f077';
@@ -29,9 +29,9 @@ try {
       fallbackKey.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []
     );
     adminKeypair = Ed25519Keypair.fromSecretKey(fallbackKeyBytes);
-    console.log("Using fallback key for admin wallet");
+    
   } catch (fallbackError) {
-    console.error("Failed to create keypair from fallback key:", fallbackError);
+    
     throw new Error("Could not initialize admin wallet - critical error");
   }
 }
@@ -58,7 +58,7 @@ export const sendSuiReward = async (
       };
     }
 
-    console.log(`Processing payment: ${amount} SUI to ${recipientAddress} for ${reason}`);
+    
 
     // Convert SUI to MIST (1 SUI = 10^9 MIST)
     const amountInMist = BigInt(Math.floor(amount * 1_000_000_000));
@@ -77,7 +77,7 @@ export const sendSuiReward = async (
       signer: adminKeypair,
     });
 
-    console.log(`Successfully sent ${amount} SUI to ${recipientAddress}, txDigest: ${result.digest}`);
+    
 
     // Store transaction record in Firestore
     const txRef = await addDoc(collection(db, 'transactions'), {
@@ -93,7 +93,7 @@ export const sendSuiReward = async (
       timestamp: serverTimestamp()
     });
 
-    console.log(`Transaction recorded in Firestore with ID: ${txRef.id}`);
+    
 
     // Update user's SUI token balance in their profile
     const userProfileRef = doc(db, 'learningProgress', recipientAddress);
@@ -117,7 +117,7 @@ export const sendSuiReward = async (
       txDigest: result.digest 
     };
   } catch (error) {
-    console.error('Error sending SUI tokens:', error);
+    
     
     // Store failed transaction attempt
     try {
@@ -130,7 +130,7 @@ export const sendSuiReward = async (
         timestamp: serverTimestamp()
       });
     } catch (dbError) {
-      console.error('Failed to log transaction error:', dbError);
+      
     }
     
     return { 
@@ -153,7 +153,7 @@ export const checkAdminBalance = async (): Promise<number> => {
     // Convert balance from MIST to SUI
     return Number(balance.totalBalance) / 1_000_000_000;
   } catch (error) {
-    console.error('Error checking admin balance:', error);
+    
     return 0;
   }
 };

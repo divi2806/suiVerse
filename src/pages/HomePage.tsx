@@ -92,7 +92,7 @@ const HomePage = () => {
       }
       setShowOnboarding(false);
     } catch (error) {
-      console.error("Error closing onboarding:", error);
+      
       // Make sure we always close the modal even if updating data fails
       setShowOnboarding(false);
     }

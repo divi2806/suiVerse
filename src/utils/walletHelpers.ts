@@ -25,7 +25,7 @@ export const handleWalletDisconnect = (disconnectMutation: ReturnType<typeof use
         callback();
       }
     } catch (error) {
-      console.error("Error disconnecting wallet:", error);
+      
       toast({
         title: "Disconnection Failed",
         description: "There was a problem disconnecting your wallet.",

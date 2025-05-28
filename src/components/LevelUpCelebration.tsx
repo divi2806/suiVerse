@@ -28,7 +28,7 @@ export const showLevelUpCelebration = (details: LevelUpDetails) => {
   if (globalShowLevelUpModal) {
     globalShowLevelUpModal(details);
   } else {
-    console.error("Level up modal not initialized yet");
+    
   }
 };
 

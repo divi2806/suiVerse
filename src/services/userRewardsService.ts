@@ -63,7 +63,7 @@ export const rewardUser = async (
     
     return result;
   } catch (error) {
-    console.error('Error rewarding user:', error);
+    
     return { 
       success: false, 
       message: error instanceof Error ? error.message : 'Unknown error rewarding user' 
@@ -89,7 +89,7 @@ export const getUserRewards = async (walletAddress: string): Promise<UserReward[
       ...doc.data(),
     } as UserReward));
   } catch (error) {
-    console.error('Error getting user rewards:', error);
+    
     return [];
   }
 };
@@ -166,7 +166,7 @@ export const getUserRewardsSummary = async (walletAddress: string): Promise<Rewa
     
     return summary;
   } catch (error) {
-    console.error('Error getting user rewards summary:', error);
+    
     return {
       totalEarned: 0,
       gameRewards: 0,
@@ -197,7 +197,7 @@ export const getRecentRewards = async (walletAddress: string, limitCount: number
       ...doc.data(),
     } as UserReward));
   } catch (error) {
-    console.error('Error getting recent rewards:', error);
+    
     return [];
   }
 };
@@ -217,7 +217,7 @@ export const isTransactionRecorded = async (txDigest: string): Promise<boolean> 
     
     return !txSnapshot.empty;
   } catch (error) {
-    console.error('Error checking if transaction is recorded:', error);
+    
     return false;
   }
 };

@@ -284,7 +284,7 @@ const BlazoChat = forwardRef<BlazoChatHandle, BlazoChatProps>(({ textareaRef }, 
         });
       }
     } catch (error) {
-      console.error('Error generating smart contract:', error);
+      
       
       // Replace loading message with error
       setMessages(prev => prev.map(msg => 
@@ -381,7 +381,7 @@ const BlazoChat = forwardRef<BlazoChatHandle, BlazoChatProps>(({ textareaRef }, 
           : msg
       ));
     } catch (error) {
-      console.error('Error analyzing smart contract:', error);
+      
       
       setMessages(prev => prev.map(msg => 
         msg.id === loadingMessage.id
@@ -425,7 +425,7 @@ const BlazoChat = forwardRef<BlazoChatHandle, BlazoChatProps>(({ textareaRef }, 
           },
           {
             onSuccess: (result) => {
-              console.log("Payment successful:", result);
+              
               
               // Update user's access status
               setHasUnlockedAccess(true);
@@ -454,14 +454,14 @@ const BlazoChat = forwardRef<BlazoChatHandle, BlazoChatProps>(({ textareaRef }, 
                     blazoUnlocked: true
                   });
                 } catch (err) {
-                  console.error("Error updating blazo access:", err);
+                  
                 }
               }
               
               resolve();
             },
             onError: (error) => {
-              console.error("Payment error:", error);
+              
               toast({
                 title: "Payment Failed",
                 description: "There was an error processing your payment. Please try again.",
@@ -478,7 +478,7 @@ const BlazoChat = forwardRef<BlazoChatHandle, BlazoChatProps>(({ textareaRef }, 
         );
       });
     } catch (error) {
-      console.error("Payment error:", error);
+      
       toast({
         title: "Payment Failed",
         description: "There was an error processing your payment. Please try again.",
