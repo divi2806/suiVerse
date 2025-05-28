@@ -71,8 +71,17 @@ interface StreakDetails {
 
 // Export a function that can be called from anywhere
 export const showDailyStreakModal = (details: StreakDetails) => {
+  // Check if this is a login event by checking session storage
+  const isLoginEvent = sessionStorage.getItem('just_connected_wallet') === 'true';
+  
   // Check if more than 24 hours have passed since last popup
   const shouldAllowNewPopup = () => {
+    // If it's a login event, always allow
+    if (isLoginEvent) {
+      console.log("Login event detected, allowing new popup");
+      return true;
+    }
+    
     const lastTimestampStr = localStorage.getItem('streak_popup_last_timestamp');
     if (lastTimestampStr) {
       const lastTimestamp = parseInt(lastTimestampStr, 10);
@@ -94,7 +103,7 @@ export const showDailyStreakModal = (details: StreakDetails) => {
   
   // Check if we should skip based on shorter time periods (same day/session)
   const shouldSkipStreak = () => {
-    // If we're forcing a new popup due to 24+ hours, don't skip
+    // If we're forcing a new popup due to login or 24+ hours, don't skip
     if (shouldAllowNewPopup()) {
       return false;
     }
@@ -105,14 +114,14 @@ export const showDailyStreakModal = (details: StreakDetails) => {
     // Check if shown today already using ISO date string
     const today = new Date().toISOString().split('T')[0];
     const lastShownDay = localStorage.getItem('last_streak_popup_day');
-    if (lastShownDay === today) {
+    if (lastShownDay === today && !isLoginEvent) {
       console.log("Already shown streak popup today (date check)");
       return true;
     }
     
     // Check if shown in last 6 hours via localStorage
     const lastTimestampStr = localStorage.getItem('streak_popup_last_timestamp');
-    if (lastTimestampStr) {
+    if (lastTimestampStr && !isLoginEvent) {
       const lastTimestamp = parseInt(lastTimestampStr, 10);
       const sixHoursMs = 6 * 60 * 60 * 1000;
       if (Date.now() - lastTimestamp < sixHoursMs) {
@@ -121,7 +130,7 @@ export const showDailyStreakModal = (details: StreakDetails) => {
       }
     }
     
-    return shownThisSession;
+    return shownThisSession && !isLoginEvent;
   };
   
   if (shouldSkipStreak()) {
@@ -138,6 +147,9 @@ export const showDailyStreakModal = (details: StreakDetails) => {
   localStorage.setItem('streak_popup_last_timestamp', Date.now().toString());
   const today = new Date().toISOString().split('T')[0];
   localStorage.setItem('last_streak_popup_day', today);
+  
+  // Remove login flag after successfully showing
+  sessionStorage.removeItem('just_connected_wallet');
   
   // Actually show the modal
   if (globalShowStreakModal) {
@@ -165,14 +177,24 @@ const DailyStreakModal = () => {
 
     // Listen for the dailyStreakChecked event
     const handleStreakChecked = (event: CustomEvent) => {
-      // Skip if we've already shown the modal this session
-      if (hasShownStreakModalThisSession) {
+      const data = event.detail;
+      
+      // Check if this is a login event by checking session storage
+      const isLoginEvent = sessionStorage.getItem('just_connected_wallet') === 'true';
+      
+      // Reset session flag if login event to ensure popup shows
+      if (isLoginEvent) {
+        hasShownStreakModalThisSession = false;
+        window.hasShownStreakModalThisSession = false;
+      }
+      
+      // Skip if we've already shown the modal this session and it's not a login event
+      if (hasShownStreakModalThisSession && !isLoginEvent) {
         console.log("DailyStreakModal: Already shown this session, ignoring event");
         return;
       }
       
-      const data = event.detail;
-      if (data.isNewDay) {
+      if (data.isNewDay || isLoginEvent) {
         // Mark as shown
         hasShownStreakModalThisSession = true;
         sessionStorage.setItem('streak_popup_session', 'true');

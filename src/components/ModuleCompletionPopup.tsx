@@ -201,14 +201,14 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
   const viewOnExplorer = () => {
     if (nftId) {
       const explorerUrl = network === 'mainnet'
-        ? `https://explorer.sui.io/objects/${nftId}`
-        : `https://explorer.${network}.sui.io/objects/${nftId}`;
+        ? `https://suiscan.xyz/objects/${nftId}`
+        : `https://suiscan.xyz/${network}/objects/${nftId}`;
       
       window.open(explorerUrl, '_blank');
     } else if (txDigest) {
       const explorerUrl = network === 'mainnet'
-        ? `https://explorer.sui.io/txblock/${txDigest}`
-        : `https://explorer.${network}.sui.io/txblock/${txDigest}`;
+        ? `https://suiscan.xyz/${network}/tx/${txDigest}`
+        : `https://suiscan.xyz/${network}/tx/${txDigest}`;
       
       window.open(explorerUrl, '_blank');
     }

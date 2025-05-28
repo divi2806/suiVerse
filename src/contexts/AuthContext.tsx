@@ -279,11 +279,20 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (!walletAddress) return;
     
     try {
+      // For login/reconnection, we want to check if we need to force showing the popup
+      const isLoginEvent = sessionStorage.getItem('just_connected_wallet') === 'true';
+      
       // Check when the last popup was shown (timestamp)
       const lastTimestampStr = localStorage.getItem(STREAK_POPUP_TIMESTAMP_KEY);
       let forceCheck = false;
       
-      if (lastTimestampStr) {
+      // If user just logged in, force streak check
+      if (isLoginEvent) {
+        console.log("User just connected wallet - forcing streak check");
+        forceCheck = true;
+        // Clear the login flag
+        sessionStorage.removeItem('just_connected_wallet');
+      } else if (lastTimestampStr) {
         const lastTimestamp = parseInt(lastTimestampStr, 10);
         const hoursSinceLastPopup = (Date.now() - lastTimestamp) / (1000 * 60 * 60);
         
@@ -309,15 +318,21 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // Make sure we have the latest user data after streak check
       await refreshUserData();
       
-      // Show popup if it's a new day or if we're forcing a check after 24+ hours
+      // Show popup if it's a new day or if we're forcing a check after 24+ hours or on login
       if (streakResult.isNewDay || forceCheck) {
         // Set flag to prevent showing streak popup again in this session
         updateStreakPopupDay();
         
+        // Reset hasShownStreakPopup to ensure it will be shown on this login
+        if (isLoginEvent) {
+          hasShownStreakPopup = false;
+          sessionStorage.removeItem(STREAK_POPUP_SESSION_KEY);
+        }
+        
         // Emit a custom event that other components can listen for
         const streakEvent = new CustomEvent('dailyStreakChecked', { 
           detail: {
-            isNewDay: true, // Force to true if we're doing a 24+ hour check
+            isNewDay: true, // Force to true if we're doing a 24+ hour check or login check
             currentStreak: streakResult.currentStreak,
             xpAwarded: streakResult.xpAwarded,
             isMilestone: streakResult.isMilestone,
@@ -416,6 +431,9 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
         
         try {
+          // Set a flag to indicate user just connected wallet
+          sessionStorage.setItem('just_connected_wallet', 'true');
+          
           setLoading(true);
           setWalletAddress(currentAccount.address);
           prevWalletRef.current = currentAccount.address;

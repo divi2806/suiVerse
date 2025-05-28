@@ -230,18 +230,25 @@ export const recordSuccessfulMint = async (
     
     const imageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${moduleId}`;
     
-    await addDoc(collection(db, 'user_nfts'), {
+    // Create NFT data object without the nftId field initially
+    const nftData = {
       userId: walletAddress,
       walletAddress: walletAddress,
       moduleId: moduleId,
       moduleName: moduleData.name,
       description: moduleData.description,
       imageUrl: imageUrl,
-      nftId: nftId,
       txDigest: txDigest,
       network: network,
       timestamp: serverTimestamp()
-    });
+    };
+    
+    // Only add nftId to the object if it's defined
+    if (nftId !== undefined) {
+      Object.assign(nftData, { nftId });
+    }
+    
+    await addDoc(collection(db, 'user_nfts'), nftData);
     
     console.log(`NFT mint recorded in Firestore for ${walletAddress}, module ${moduleId}`);
     return true;
