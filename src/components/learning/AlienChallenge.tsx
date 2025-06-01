@@ -3,9 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { CodingChallenge } from '@/services/geminiService';
-import { Bug, CheckCircle, HelpCircle, Rocket, XCircle, Loader2 } from 'lucide-react';
+import { Bug, CheckCircle, HelpCircle, Rocket, XCircle, Loader2, Code, ArrowRight, Save } from 'lucide-react';
 import { useToast } from "@/components/ui/use-toast";
 import { generateContent } from '@/services/geminiService';
+import SyntaxHighlighter from 'react-syntax-highlighter';
+import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import './alien-challenge.css';
 
 interface AlienChallengeProps {
@@ -22,14 +24,9 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
   const [showSolution, setShowSolution] = useState(false);
   const [battleAnimation, setBattleAnimation] = useState(false);
   const [evaluationFeedback, setEvaluationFeedback] = useState('');
+  const [currentStep, setCurrentStep] = useState<'intro' | 'coding' | 'battle' | 'result'>('intro');
   const { toast } = useToast();
   
-  // Debug log to see if the editor is getting initialized with the right value
-  useEffect(() => {
-    
-    
-  }, []);
-
   // Reset state when challenge changes
   useEffect(() => {
     setCode(challenge.codeSnippet);
@@ -40,10 +37,10 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
     setShowSolution(false);
     setBattleAnimation(false);
     setEvaluationFeedback('');
+    setCurrentStep('intro');
   }, [challenge.id]);
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    
     setCode(e.target.value);
   };
 
@@ -94,13 +91,11 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
       `;
       
       // Call Gemini API
-      
       const response = await generateContent(prompt);
       
       try {
         // Parse JSON response
         const parsedResponse = JSON.parse(response);
-        
         
         // Check if solution is correct based on AI evaluation
         const isCorrect = parsedResponse.isCorrect === true || 
@@ -112,9 +107,6 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
                     (isCorrect ? "Your solution works correctly!" : "Your solution has some issues.")
         };
       } catch (parseError) {
-        
-        
-        
         // If JSON parsing fails, do a simpler text-based check
         const isCorrect = response.toLowerCase().includes("correct") && 
                          !response.toLowerCase().includes("incorrect") &&
@@ -128,8 +120,6 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
         };
       }
     } catch (error) {
-      
-      
       // Fallback to simple checks if AI evaluation fails
       const cleanUserCode = userCode.replace(/\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').toLowerCase();
       const cleanSolution = solution.replace(/\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').toLowerCase();
@@ -165,18 +155,17 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
     }
     
     setIsSubmitting(true);
+    setCurrentStep('battle');
     setBattleAnimation(true);
     
     try {
-      
-      
       // Evaluate the code using AI
       const evaluation = await checkCodeSolution(code, challenge.solution);
-      
       
       // Set the result and feedback
       setResult(evaluation.success ? 'success' : 'failure');
       setEvaluationFeedback(evaluation.feedback);
+      setCurrentStep('result');
       
       // If successful, notify the parent component after a short delay
       if (evaluation.success) {
@@ -185,7 +174,6 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
         }, 2000);
       }
     } catch (error) {
-      
       toast({
         title: "Evaluation Error",
         description: "An error occurred while evaluating your code. Please try again.",
@@ -193,6 +181,7 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
       });
       setResult('failure');
       setEvaluationFeedback("We couldn't properly evaluate your code due to a system error.");
+      setCurrentStep('result');
     } finally {
       setIsSubmitting(false);
     }
@@ -217,12 +206,278 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
     setResult(null);
     setBattleAnimation(false);
     setEvaluationFeedback('');
+    setCurrentStep('coding');
   };
 
   const handleGiveUp = () => {
     setShowSolution(true);
     setResult('failure');
     onComplete(challenge.id, false);
+  };
+  
+  const handleStartCoding = () => {
+    setCurrentStep('coding');
+  };
+
+  const renderIntroScreen = () => {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col space-y-2">
+          <h3 className="text-2xl font-bold mb-2">Alien Challenge: Code Battle</h3>
+          <p className="text-lg">An alien has challenged you to write a Move smart contract to solve a problem!</p>
+        </div>
+        
+        <div className="p-4 bg-purple-900/30 rounded-lg border border-purple-500/30 space-y-4">
+          <div className="space-y-2">
+            <h4 className="text-lg font-semibold text-purple-300">Scenario</h4>
+            <p className="text-foreground/90">{challenge.scenario}</p>
+          </div>
+          
+          <div className="space-y-2">
+            <h4 className="text-lg font-semibold text-purple-300">Your Task</h4>
+            <p className="text-foreground/90">{challenge.task}</p>
+          </div>
+        </div>
+        
+        <div className="flex justify-end">
+          <Button 
+            onClick={handleStartCoding}
+            className="neon-button flex items-center gap-2"
+          >
+            Begin Coding
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+  
+  const renderCodingScreen = () => {
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between">
+          <h3 className="text-2xl font-bold">Alien Challenge: Coding</h3>
+          
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleShowHint}
+              disabled={showHint && currentHint >= challenge.hints.length - 1}
+              className="flex items-center gap-1"
+            >
+              <HelpCircle className="h-4 w-4" />
+              {showHint ? 'Next Hint' : 'Get Hint'}
+            </Button>
+          </div>
+        </div>
+        
+        {showHint && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 bg-primary/10 rounded-md border border-primary/30"
+          >
+            <div className="flex">
+              <HelpCircle className="h-5 w-5 text-primary mr-2 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-sm text-primary mb-1">Hint {currentHint + 1}:</p>
+                <p className="text-sm text-foreground/90">{challenge.hints[currentHint]}</p>
+                
+                {currentHint < challenge.hints.length - 1 && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={handleNextHint}
+                    className="mt-2 text-xs"
+                  >
+                    Show next hint
+                  </Button>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+        
+        <div className="grid grid-cols-1 gap-4">
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Code className="h-5 w-5 text-blue-400" />
+                <h4 className="font-medium">Your Code</h4>
+              </div>
+              
+              {showSolution && (
+                <span className="text-xs text-yellow-400">
+                  Solution shown below
+                </span>
+              )}
+            </div>
+            
+            <div className="relative min-h-[350px] rounded-md overflow-hidden">
+              <textarea
+                className="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-black/50 text-foreground/90 border border-primary/20 rounded-md focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                value={showSolution ? challenge.solution : code}
+                onChange={handleCodeChange}
+                readOnly={showSolution}
+                placeholder="Write your solution here..."
+              />
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentStep('intro')}
+              className="flex items-center gap-1"
+            >
+              <ArrowRight className="h-4 w-4 rotate-180" />
+              Back to Instructions
+            </Button>
+            
+            <div className="flex gap-2">
+              {!showSolution && (
+                <Button
+                  variant="secondary"
+                  onClick={handleShowSolution}
+                  className="flex items-center gap-1"
+                >
+                  <CheckCircle className="h-4 w-4" />
+                  Show Solution
+                </Button>
+              )}
+              
+              <Button
+                onClick={handleSubmit}
+                disabled={isSubmitting || showSolution}
+                className="neon-button flex items-center gap-1"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Evaluating...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Submit Solution
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const renderBattleScreen = () => {
+    return (
+      <div className="battle-animation-container">
+        <div className="battle-scene">
+          <div className="alien">
+            <div className="alien-body">
+              <div className="alien-eyes"></div>
+            </div>
+            <div className="alien-tentacles"></div>
+          </div>
+          
+          <div className="code-warrior">
+            <div className="code-warrior-body">
+              <div className="code-warrior-helmet"></div>
+            </div>
+            <div className="code-warrior-weapon"></div>
+          </div>
+          
+          <div className="battle-effects"></div>
+        </div>
+        
+        <div className="battle-text">
+          <h3 className="text-xl font-bold mb-2">Code Battle in Progress...</h3>
+          <p>Your code is being analyzed and tested against the alien's challenge!</p>
+        </div>
+      </div>
+    );
+  };
+  
+  const renderResultScreen = () => {
+    return (
+      <div className="space-y-6">
+        <div className="text-center mb-8">
+          <div className="inline-flex justify-center items-center w-20 h-20 rounded-full mb-4">
+            {result === 'success' ? (
+              <div className="success-glow">
+                <CheckCircle className="h-16 w-16 text-green-500" />
+              </div>
+            ) : (
+              <div className="failure-glow">
+                <XCircle className="h-16 w-16 text-red-500" />
+              </div>
+            )}
+          </div>
+          
+          <h2 className="text-2xl font-bold mb-2">
+            {result === 'success' ? 'Challenge Completed!' : 'Not Quite Right'}
+          </h2>
+          
+          <p className="text-lg">
+            {result === 'success' 
+              ? 'Your code defeated the alien challenge!' 
+              : 'Your code needs some adjustments. Try again!'}
+          </p>
+        </div>
+        
+        <div className="p-4 bg-background/50 rounded-lg border border-border">
+          <h3 className="text-lg font-medium mb-2">Feedback</h3>
+          <p className="text-foreground/90">{evaluationFeedback}</p>
+        </div>
+        
+        {/* Code display with syntax highlighting */}
+        <div className="overflow-hidden rounded-md border border-border">
+          <div className="bg-black/20 p-2 text-xs font-medium">Your Submission</div>
+          <SyntaxHighlighter
+            language="rust"
+            style={atomOneDark}
+            showLineNumbers={true}
+            customStyle={{ margin: 0, borderRadius: 0, maxHeight: '200px' }}
+          >
+            {code}
+          </SyntaxHighlighter>
+        </div>
+        
+        <div className="flex justify-between pt-4">
+          {result === 'success' ? (
+            <div className="flex-1"></div>
+          ) : (
+            <Button
+              onClick={handleTryAgain}
+              variant="outline"
+              className="flex items-center gap-1"
+            >
+              <ArrowRight className="h-4 w-4 rotate-180" />
+              Try Again
+            </Button>
+          )}
+          
+          <Button
+            onClick={result === 'success' ? () => onComplete(challenge.id, true) : handleGiveUp}
+            className={`neon-button flex items-center gap-1 ${result === 'success' ? 'bg-green-600 hover:bg-green-700' : ''}`}
+          >
+            {result === 'success' ? (
+              <>
+                <Rocket className="h-4 w-4" />
+                Continue Journey
+              </>
+            ) : (
+              <>
+                <CheckCircle className="h-4 w-4" />
+                View Solution & Continue
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -231,168 +486,20 @@ const AlienChallenge: React.FC<AlienChallengeProps> = ({ challenge, onComplete }
         <div className="space-stars absolute inset-0 overflow-hidden opacity-20"></div>
         
         <div className="relative z-10">
-          <div className="mb-6 flex items-center">
-            <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center mr-3">
-              <Bug className="h-6 w-6 text-purple-400" />
-            </div>
-            <h3 className="text-2xl font-bold">Alien Challenge: Code Battle</h3>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <div className="mb-4">
-                <h4 className="text-xl mb-2">Scenario</h4>
-                <p className="text-foreground/80">{challenge.scenario}</p>
-              </div>
-              
-              <div className="mb-4">
-                <h4 className="text-xl mb-2">Your Task</h4>
-                <p className="text-foreground/80">{challenge.task}</p>
-              </div>
-              
-              <AnimatePresence>
-                {showHint && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="hint-box p-4 rounded-lg bg-primary/10 border border-primary/30 mb-4"
-                  >
-                    <div className="flex justify-between items-start">
-                      <h4 className="text-lg flex items-center">
-                        <HelpCircle className="h-5 w-5 mr-2 text-primary" />
-                        Hint {currentHint + 1}:
-                      </h4>
-                      {challenge.hints.length > 1 && (
-                        <div className="text-sm text-foreground/60">
-                          {currentHint + 1}/{challenge.hints.length}
-                          {currentHint < challenge.hints.length - 1 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={handleNextHint}
-                              className="ml-2 h-6 text-primary hover:text-primary/80"
-                            >
-                              Next Hint
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <p className="mt-2">{challenge.hints[currentHint]}</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              
-              {battleAnimation && (
-                <div className="battle-animation-container mb-4 h-40 relative overflow-hidden rounded-lg bg-gradient-to-r from-purple-900/30 to-indigo-900/30">
-                  <div className="battle-scene">
-                    <div className="alien-ship"></div>
-                    <div className="player-ship"></div>
-                    <div className="laser-beams"></div>
-                    <div className="stars"></div>
-                    {result === 'success' && (
-                      <div className="explosion"></div>
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              <div className="flex flex-wrap gap-2 mt-4">
-                {!showHint && !isSubmitting && result === null && (
-                  <Button 
-                    variant="outline" 
-                    onClick={handleShowHint}
-                    className="text-primary border-primary/50"
-                  >
-                    <HelpCircle className="mr-2 h-4 w-4" />
-                    Get Hint
-                  </Button>
-                )}
-                
-                {!showSolution && result === 'failure' && (
-                  <Button 
-                    variant="outline" 
-                    onClick={handleShowSolution}
-                    className="text-primary border-primary/50"
-                  >
-                    Show Solution
-                  </Button>
-                )}
-                
-                {result === 'failure' && (
-                  <Button 
-                    variant="outline" 
-                    onClick={handleTryAgain}
-                    className="text-primary border-primary/50"
-                  >
-                    Try Again
-                  </Button>
-                )}
-                
-                {!result && !isSubmitting && (
-                  <Button 
-                    variant="outline" 
-                    onClick={handleGiveUp}
-                    className="text-destructive border-destructive/50"
-                  >
-                    Give Up
-                  </Button>
-                )}
-              </div>
-            </div>
-            
-            <div>
-              <div className="code-editor-wrapper mb-4">
-                <div className="code-editor-header flex justify-between items-center px-4 py-2 bg-card border-b border-border">
-                  <span className="text-sm font-medium">Move Code Editor</span>
-                  <div className="flex space-x-2">
-                    <div className="h-3 w-3 rounded-full bg-red-500"></div>
-                    <div className="h-3 w-3 rounded-full bg-yellow-500"></div>
-                    <div className="h-3 w-3 rounded-full bg-green-500"></div>
-                  </div>
-                </div>
-                <textarea
-                  value={showSolution ? challenge.solution : code}
-                  onChange={handleCodeChange}
-                  className="w-full h-60 bg-black/90 text-primary font-mono p-4 border-none focus:outline-none"
-                  disabled={isSubmitting || showSolution || result === 'success'}
-                  onClick={() => {}}
-                />
-              </div>
-              
-              <div className="flex justify-between mt-4">
-                <div className="flex gap-2">
-                  {isSubmitting && (
-                    <Button disabled className="gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Evaluating...
-                    </Button>
-                  )}
-                  
-                  {result === null && !isSubmitting && (
-                    <Button onClick={handleSubmit} className="gap-2 bg-gradient-to-r from-primary to-indigo-600">
-                      <Rocket className="h-4 w-4" />
-                      Submit Code
-                    </Button>
-                  )}
-                </div>
-                
-                {evaluationFeedback && (
-                  <div className={`p-3 rounded-md ${result === 'success' ? 'bg-green-500/20' : 'bg-red-500/20'} max-w-full mt-4`}>
-                    <div className="flex items-start gap-2">
-                      {result === 'success' ? (
-                        <CheckCircle className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
-                      ) : (
-                        <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
-                      )}
-                      <p className="text-sm">{evaluationFeedback}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentStep}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
+            >
+              {currentStep === 'intro' && renderIntroScreen()}
+              {currentStep === 'coding' && renderCodingScreen()}
+              {currentStep === 'battle' && renderBattleScreen()}
+              {currentStep === 'result' && renderResultScreen()}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </Card>
     </div>

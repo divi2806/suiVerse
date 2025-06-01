@@ -8,7 +8,6 @@ import { atomOneDark } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { CheckCircle, AlertTriangle, ArrowLeft, Shield } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { DailyChallenge } from '@/services/dailyChallengesService';
 
 interface SecurityIssue {
   severity: 'high' | 'medium' | 'low';
@@ -24,7 +23,7 @@ interface SecurityAuditContent {
 }
 
 interface SecurityAuditChallengeProps {
-  challenge: DailyChallenge;
+  challenge: SecurityAuditContent;
   onComplete: (score: number, isCorrect?: boolean) => void;
   onCancel: () => void;
 }
@@ -34,14 +33,11 @@ const SecurityAuditChallenge: React.FC<SecurityAuditChallengeProps> = ({
   onComplete,
   onCancel
 }) => {
-  // Extract the content from the challenge
-  const content = challenge.content as SecurityAuditContent;
-  
   const [identifiedIssues, setIdentifiedIssues] = useState<boolean[]>(
-    new Array(content.securityIssues.length).fill(false)
+    new Array(challenge.securityIssues.length).fill(false)
   );
   const [userComments, setUserComments] = useState<string[]>(
-    new Array(content.securityIssues.length).fill('')
+    new Array(challenge.securityIssues.length).fill('')
   );
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [score, setScore] = useState(0);
@@ -61,8 +57,8 @@ const SecurityAuditChallenge: React.FC<SecurityAuditChallengeProps> = ({
   const handleSubmit = () => {
     // Calculate score based on correctly identified issues
     const correctlyIdentified = identifiedIssues.filter(Boolean).length;
-    const maxScore = content.securityIssues.length * 100;
-    const earnedScore = Math.round((correctlyIdentified / content.securityIssues.length) * 100);
+    const maxScore = challenge.securityIssues.length * 100;
+    const earnedScore = Math.round((correctlyIdentified / challenge.securityIssues.length) * 100);
     
     setScore(earnedScore);
     setIsSubmitted(true);
@@ -114,7 +110,7 @@ const SecurityAuditChallenge: React.FC<SecurityAuditChallengeProps> = ({
         <CardContent>
           <div className="mb-6">
             <h3 className="text-lg font-medium mb-2">Scenario</h3>
-            <p className="text-foreground/80">{content.scenario}</p>
+            <p className="text-foreground/80">{challenge.scenario}</p>
           </div>
           
           <div className="mb-6">
@@ -127,7 +123,7 @@ const SecurityAuditChallenge: React.FC<SecurityAuditChallengeProps> = ({
                 wrapLines={true}
                 className="text-sm"
               >
-                {content.contractCode}
+                {challenge.contractCode}
               </SyntaxHighlighter>
             </ScrollArea>
           </div>
@@ -142,7 +138,7 @@ const SecurityAuditChallenge: React.FC<SecurityAuditChallengeProps> = ({
                 </p>
                 
                 <div className="space-y-4">
-                  {content.securityIssues.map((_, index) => (
+                  {challenge.securityIssues.map((_, index) => (
                     <div key={index} className="p-4 border rounded-lg">
                       <div className="flex items-start space-x-3">
                         <Checkbox 
@@ -195,69 +191,70 @@ const SecurityAuditChallenge: React.FC<SecurityAuditChallengeProps> = ({
                     </div>
                   </div>
                   <p className="text-foreground/70">
-                    You correctly identified {identifiedIssues.filter(Boolean).length} out of {content.securityIssues.length} security issues.
+                    You correctly identified {identifiedIssues.filter(Boolean).length} out of {challenge.securityIssues.length} security issues.
                   </p>
                 </div>
                 
                 <div className="space-y-4">
-                  {content.securityIssues.map((issue, index) => (
-                    <div key={index} className="p-4 border rounded-lg bg-card/50">
-                      <div className="flex items-start justify-between mb-3">
+                  {challenge.securityIssues.map((issue, index) => (
+                    <div 
+                      key={index} 
+                      className={`p-4 border rounded-lg ${
+                        identifiedIssues[index] 
+                          ? 'bg-green-500/10 border-green-500/30' 
+                          : 'bg-red-500/10 border-red-500/30'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center">
-                          <AlertTriangle className="h-5 w-5 mr-2 text-primary" />
-                          <h4 className="font-medium">Security Issue #{index + 1}</h4>
+                          {identifiedIssues[index] ? (
+                            <CheckCircle className="h-5 w-5 mr-2 text-green-500" />
+                          ) : (
+                            <AlertTriangle className="h-5 w-5 mr-2 text-red-500" />
+                          )}
+                          <h4 className="font-medium">
+                            Issue #{index + 1}: {identifiedIssues[index] ? 'Identified' : 'Missed'}
+                          </h4>
                         </div>
-                        {renderSeverityBadge(issue.severity)}
+                        <div>
+                          {renderSeverityBadge(issue.severity)}
+                        </div>
                       </div>
                       
-                      <div className="grid gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-foreground/70">Location:</p>
-                          <p className="text-foreground">{issue.location}</p>
+                      <div className="ml-7 space-y-2">
+                        <div className="mb-2">
+                          <h5 className="text-sm font-medium">Description:</h5>
+                          <p className="text-sm text-foreground/80">{issue.description}</p>
+                        </div>
+                        
+                        <div className="mb-2">
+                          <h5 className="text-sm font-medium">Location:</h5>
+                          <p className="text-sm text-foreground/80 font-mono">{issue.location}</p>
                         </div>
                         
                         <div>
-                          <p className="text-sm font-medium text-foreground/70">Description:</p>
-                          <p className="text-foreground">{issue.description}</p>
+                          <h5 className="text-sm font-medium">Recommendation:</h5>
+                          <p className="text-sm text-foreground/80">{issue.recommendation}</p>
                         </div>
                         
-                        <div>
-                          <p className="text-sm font-medium text-foreground/70">Recommendation:</p>
-                          <p className="text-foreground">{issue.recommendation}</p>
-                        </div>
-                        
-                        {userComments[index] && (
-                          <div>
-                            <p className="text-sm font-medium text-foreground/70">Your Analysis:</p>
-                            <p className="text-foreground italic">{userComments[index]}</p>
+                        {identifiedIssues[index] && userComments[index] && (
+                          <div className="mt-3 pt-3 border-t border-border/40">
+                            <h5 className="text-sm font-medium">Your Analysis:</h5>
+                            <p className="text-sm text-foreground/80">{userComments[index]}</p>
                           </div>
                         )}
-                        
-                        <div className="mt-2">
-                          <div className="flex items-center">
-                            <div className="w-5 h-5 mr-2 flex items-center justify-center">
-                              {identifiedIssues[index] ? (
-                                <CheckCircle className="h-4 w-4 text-green-500" />
-                              ) : (
-                                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                              )}
-                            </div>
-                            <p className="text-sm font-medium">
-                              {identifiedIssues[index] 
-                                ? "You identified this issue" 
-                                : "You missed this issue"}
-                            </p>
-                          </div>
-                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
+                
+                <Button 
+                  onClick={handleFinish} 
+                  className="w-full mt-6"
+                >
+                  Complete Challenge
+                </Button>
               </div>
-              
-              <Button onClick={handleFinish} className="w-full">
-                Claim Rewards
-              </Button>
             </>
           )}
         </CardContent>

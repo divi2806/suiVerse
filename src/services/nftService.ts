@@ -51,13 +51,8 @@ const MODULE_DATA = [
   { id: 13, name: "Shared Objects", description: "Built applications with shared object access" },
   { id: 14, name: "Sui Tokenomics", description: "Understood Sui's economic model and incentives" },
   { id: 15, name: "Advanced Patterns", description: "Implemented sophisticated design patterns in Move" },
-  { id: 16, name: "Graduation", description: "Completed the entire Stellar Academy curriculum" }
+  { id: 16, name: "Graduation", description: "Completed the entire SuiVerse Academy curriculum" }
 ];
-
-// Enable test mode for development by default to avoid blockchain errors
-const DEFAULT_TEST_MODE = false;
-// Force real minting by default
-const DEFAULT_FORCE_REAL_MINTING = true;
 
 /**
  * Creates a transaction block for minting an NFT
@@ -69,6 +64,8 @@ export const createNFTMintingTransaction = (
   recipientAddress: string,
   moduleId: number
 ): TransactionBlock => {
+  console.log(`[NFT] Creating transaction block for module ${moduleId}, recipient: ${recipientAddress}`);
+  
   // Get module data
   const moduleData = MODULE_DATA.find(m => m.id === moduleId) || {
     name: `Module ${moduleId}`,
@@ -77,6 +74,9 @@ export const createNFTMintingTransaction = (
 
   // Generate image URL using DiceBear
   const imageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${moduleId}`;
+  
+  console.log(`[NFT] Module data: ${moduleData.name}, image URL: ${imageUrl}`);
+  console.log(`[NFT] Using contract: ${PACKAGE_ID}`);
   
   // Create a new transaction block
   const tx = new TransactionBlock();
@@ -93,6 +93,7 @@ export const createNFTMintingTransaction = (
     ]
   });
 
+  console.log(`[NFT] Transaction block created successfully`);
   return tx;
 };
 
@@ -108,58 +109,19 @@ export const mintModuleCompletionNFT = async (
   moduleId: number
 ): Promise<{ success: boolean; txDigest?: string; message?: string; nftId?: string; transaction?: TransactionBlock }> => {
   try {
-    
+    console.log(`[NFT] Starting mintModuleCompletionNFT for address: ${recipientAddress}, module: ${moduleId}`);
     
     // Improved address validation
     if (!recipientAddress || typeof recipientAddress !== 'string') {
-      
+      console.error('[NFT] Invalid recipient address format');
       return { 
         success: false, 
         message: 'Invalid recipient address format' 
       };
     }
-
-    // For testing mode - bypass the real minting and return mock success
-    const isTestMode = import.meta.env.VITE_TEST_MODE === 'true' || DEFAULT_TEST_MODE;
-    const forceRealMinting = import.meta.env.VITE_FORCE_REAL_MINTING === 'true' || DEFAULT_FORCE_REAL_MINTING;
     
-    if (forceRealMinting && (isTestMode || recipientAddress === 'test-wallet')) {
-      
-      
-    }
-    
-    if ((isTestMode || recipientAddress === 'test-wallet') && !forceRealMinting) {
-      
-      const mockNftId = `test-nft-${Date.now()}`;
-      
-      // Store a record in Firestore for consistency
-      try {
-        await addDoc(collection(db, 'user_nfts'), {
-          userId: recipientAddress,
-          walletAddress: recipientAddress,
-          moduleId: moduleId,
-          moduleName: MODULE_DATA.find(m => m.id === moduleId)?.name || `Module ${moduleId}`,
-          description: MODULE_DATA.find(m => m.id === moduleId)?.description || 'Test NFT',
-          imageUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=module${moduleId}`,
-          nftId: mockNftId,
-          txDigest: 'test-tx-' + Date.now(),
-          network: 'testnet',
-          timestamp: serverTimestamp(),
-          isTest: true
-        });
-      } catch (testDbError) {
-        
-      }
-      
-      return {
-        success: true,
-        txDigest: 'test-tx-' + Date.now(),
-        nftId: mockNftId,
-        message: 'Test mode: NFT minted successfully (simulated)'
-      };
-    }
-
     if (moduleId < 1 || moduleId > 16) {
+      console.error(`[NFT] Invalid moduleId: ${moduleId}`);
       return { 
         success: false, 
         message: 'Invalid module ID. Must be between 1 and 16.' 
@@ -168,29 +130,17 @@ export const mintModuleCompletionNFT = async (
 
     // Check if user already has this NFT
     const hasNFT = await hasModuleNFT(recipientAddress, moduleId);
-    // Skip hasNFT check for test-wallet or when force minting is enabled
-    const isTestWallet = recipientAddress === 'test-wallet' || recipientAddress.toLowerCase().includes('test');
-    if (hasNFT && !forceRealMinting && !isTestWallet) {
+    console.log(`[NFT] User already has NFT for module ${moduleId}: ${hasNFT}`);
+    
+    if (hasNFT) {
       return {
         success: false,
-        message: 'You already have an NFT for this module.'
+        message: `You already own the NFT for Module ${moduleId}. Check your inventory.`
       };
     }
-
-    // Get module data
-    const moduleData = MODULE_DATA.find(m => m.id === moduleId);
-    if (!moduleData) {
-      return {
-        success: false,
-        message: 'Module data not found.'
-      };
-    }
-
-    
-    
-    
     
     // Create the transaction for the wallet to sign
+    console.log(`[NFT] Creating transaction for module ${moduleId}`);
     const transaction = createNFTMintingTransaction(recipientAddress, moduleId);
     
     // For backend integration, simply return the transaction for the frontend to sign with user's wallet
@@ -201,11 +151,25 @@ export const mintModuleCompletionNFT = async (
     };
     
   } catch (error) {
+    console.error('[NFT] Error creating NFT minting transaction:', error);
     
-    return { 
-      success: false, 
-      message: error instanceof Error ? error.message : 'Unknown error creating NFT minting transaction' 
-    };
+    // Create a fallback transaction as a last resort
+    try {
+      console.log(`[NFT] Attempting fallback transaction creation`);
+      const transaction = createNFTMintingTransaction(recipientAddress, moduleId);
+      
+      return {
+        success: true,
+        message: 'Transaction created with fallback data. Please sign with your wallet.',
+        transaction
+      };
+    } catch (fallbackError) {
+      console.error('[NFT] Fallback transaction creation failed:', fallbackError);
+      return { 
+        success: false, 
+        message: error instanceof Error ? error.message : 'Unknown error creating NFT minting transaction' 
+      };
+    }
   }
 };
 
@@ -266,6 +230,8 @@ export const recordSuccessfulMint = async (
  */
 export const hasModuleNFT = async (walletAddress: string, moduleId: number): Promise<boolean> => {
   try {
+    console.log(`[NFT] Checking if user ${walletAddress} has NFT for module ${moduleId}`);
+    
     // Query Firestore for existing NFT records
     const nftsSnapshot = await getDocs(
       query(
@@ -275,9 +241,20 @@ export const hasModuleNFT = async (walletAddress: string, moduleId: number): Pro
       )
     );
     
-    return !nftsSnapshot.empty;
-  } catch (error) {
+    const hasNFTInFirestore = !nftsSnapshot.empty;
     
+    if (hasNFTInFirestore) {
+      console.log(`[NFT] Found existing NFT in Firestore for module ${moduleId}`);
+      return true;
+    }
+    
+    // Additional check if needed for on-chain verification
+    // This would be a more complex implementation involving querying the blockchain
+    
+    return false;
+  } catch (error) {
+    console.error(`[NFT] Error checking if user has NFT:`, error);
+    // Default to false to allow minting - better user experience than blocking incorrectly
     return false;
   }
 };

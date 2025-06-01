@@ -4,7 +4,6 @@ import { Zap, Trophy, Check, X, HelpCircle, ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/use-toast";
-import { DailyChallenge } from '@/services/dailyChallengesService';
 
 interface CodePuzzleContent {
   challenge: string;
@@ -15,7 +14,7 @@ interface CodePuzzleContent {
 }
 
 interface CodePuzzleChallengeProps {
-  challenge: DailyChallenge;
+  challenge: CodePuzzleContent;
   onComplete: (score: number, isCorrect?: boolean) => void;
   onCancel: () => void;
 }
@@ -25,9 +24,6 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
   onComplete, 
   onCancel 
 }) => {
-  // Extract content from challenge
-  const content = challenge.content as CodePuzzleContent;
-  
   const [selectedOption, setSelectedOption] = useState<string>('');
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [showHint, setShowHint] = useState<number>(0); // 0 = no hint, 1 = first hint, 2 = second hint
@@ -77,7 +73,7 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
     }
     
     // Check if solution is correct (case insensitive and whitespace trimmed)
-    const normalizedSolution = content.solution.replace(/\s+/g, ' ').trim().toLowerCase();
+    const normalizedSolution = challenge.solution.replace(/\s+/g, ' ').trim().toLowerCase();
     const normalizedSelection = selectedOption.replace(/\s+/g, ' ').trim().toLowerCase();
     
     const correct = normalizedSolution === normalizedSelection;
@@ -150,9 +146,9 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
       </div>
       
       <div className="mb-6">
-        <h3 className="text-lg font-medium mb-2">{content.challenge}</h3>
+        <h3 className="text-lg font-medium mb-2">{challenge.challenge}</h3>
         <div className="bg-black/60 text-green-400 p-4 rounded-md font-mono text-sm overflow-x-auto mb-4">
-          <pre>{content.codeTemplate}</pre>
+          <pre>{challenge.codeTemplate}</pre>
         </div>
       </div>
       
@@ -198,43 +194,39 @@ const CodePuzzleChallenge: React.FC<CodePuzzleChallengeProps> = ({
       </div>
       
       {showHint > 0 && (
-        <div className="mt-4 p-3 bg-primary/10 rounded-md border border-primary/20">
-          <p className="text-sm">
-            <span className="font-medium">Hint {showHint}:</span> {showHint === 1 ? content.hint1 : content.hint2}
-          </p>
+        <div className="mt-4 p-3 rounded-md bg-blue-500/20 border border-blue-500/30">
+          <h4 className="font-medium text-sm text-blue-400 mb-1">
+            Hint {showHint}:
+          </h4>
+          <p className="text-sm">{showHint === 1 ? challenge.hint1 : challenge.hint2}</p>
         </div>
       )}
       
       {isCorrect !== null && (
         <motion.div 
-          className={`mt-6 p-4 rounded-md ${isCorrect ? 'bg-green-500/20' : 'bg-red-500/20'}`}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
+          className={`mt-4 p-3 rounded-md ${
+            isCorrect 
+              ? "bg-green-500/20 border border-green-500/30" 
+              : "bg-red-500/20 border border-red-500/30"
+          }`}
         >
           <div className="flex items-center">
             {isCorrect ? (
-              <>
-                <Check className="h-5 w-5 text-green-500 mr-2" />
-                <p className="font-medium text-green-500">Correct! Well done!</p>
-              </>
+              <Check className="h-5 w-5 text-green-500 mr-2" />
             ) : (
-              <>
-                <X className="h-5 w-5 text-red-500 mr-2" />
-                <p className="font-medium text-red-500">Not quite right. Try again!</p>
-              </>
+              <X className="h-5 w-5 text-red-500 mr-2" />
             )}
+            <h4 className="font-medium text-sm">
+              {isCorrect ? "Correct Solution!" : "Incorrect Solution"}
+            </h4>
           </div>
           
           {isCorrect && (
-            <div className="mt-3">
-              <p className="text-sm mb-2">You earned:</p>
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-1">
-                  <Trophy className="h-4 w-4 text-yellow-500" />
-                  <span className="font-medium">{score} points</span>
-                </div>
-              </div>
-            </div>
+            <p className="text-sm mt-1">
+              You scored {score} points!
+            </p>
           )}
         </motion.div>
       )}

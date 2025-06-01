@@ -6,8 +6,15 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/use-toast";
 
+interface QuizContent {
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation: string;
+}
+
 interface QuizChallengeProps {
-  challenge: any; // This is now the full challenge object, not just content
+  challenge: QuizContent;
   onComplete: (score: number, isCorrect?: boolean) => void;
   onCancel: () => void;
 }
@@ -17,9 +24,6 @@ const QuizChallenge: React.FC<QuizChallengeProps> = ({
   onComplete, 
   onCancel 
 }) => {
-  // Extract content from challenge for easier access
-  const content = challenge.content;
-  
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(120); // 2 minutes
@@ -67,7 +71,7 @@ const QuizChallenge: React.FC<QuizChallengeProps> = ({
     }
     
     // Check if answer is correct
-    const correct = selectedOption === content.correctAnswer;
+    const correct = selectedOption === challenge.correctAnswer;
     setIsCorrect(correct);
     
     if (correct) {
@@ -130,14 +134,14 @@ const QuizChallenge: React.FC<QuizChallengeProps> = ({
       </div>
       
       <div className="mb-8">
-        <h3 className="text-lg font-medium mb-6">{content.question}</h3>
+        <h3 className="text-lg font-medium mb-6">{challenge.question}</h3>
         
         <RadioGroup value={selectedOption?.toString()} onValueChange={(value) => setSelectedOption(parseInt(value))}>
-          {content.options.map((option: string, index: number) => (
+          {challenge.options.map((option: string, index: number) => (
             <div 
               key={index} 
               className={`mb-4 p-4 rounded-md border ${
-                isCorrect !== null && index === content.correctAnswer ? 'border-green-500 bg-green-500/10' :
+                isCorrect !== null && index === challenge.correctAnswer ? 'border-green-500 bg-green-500/10' :
                 isCorrect === false && index === selectedOption ? 'border-red-500 bg-red-500/10' :
                 'border-border hover:border-primary hover:bg-primary/5'
               }`}
@@ -151,14 +155,14 @@ const QuizChallenge: React.FC<QuizChallengeProps> = ({
                 <Label 
                   htmlFor={`option-${index}`}
                   className={`flex-grow cursor-pointer ${
-                    isCorrect !== null && index === content.correctAnswer ? 'text-green-500' :
+                    isCorrect !== null && index === challenge.correctAnswer ? 'text-green-500' :
                     isCorrect === false && index === selectedOption ? 'text-red-500' : ''
                   }`}
                 >
                   {option}
                 </Label>
                 
-                {isCorrect !== null && index === content.correctAnswer && (
+                {isCorrect !== null && index === challenge.correctAnswer && (
                   <Check className="h-5 w-5 text-green-500" />
                 )}
                 {isCorrect === false && index === selectedOption && (
@@ -195,14 +199,14 @@ const QuizChallenge: React.FC<QuizChallengeProps> = ({
             ) : (
               <>
                 <X className="h-5 w-5 text-red-500 mr-2" />
-                <p className="font-medium text-red-500">Incorrect. The right answer was: {content.options[content.correctAnswer]}</p>
+                <p className="font-medium text-red-500">Incorrect. The right answer was: {challenge.options[challenge.correctAnswer]}</p>
               </>
             )}
           </div>
           
-          <div className="text-sm mt-2">
-            <p className="font-medium mb-1">Explanation:</p>
-            <p>{content.explanation}</p>
+          <div className="mt-2 p-3 bg-primary/5 rounded-md">
+            <h4 className="text-sm font-medium mb-1">Explanation:</h4>
+            <p className="text-sm">{challenge.explanation}</p>
           </div>
           
           {isCorrect && (

@@ -6,7 +6,6 @@ import { toast } from "@/components/ui/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Card, CardContent } from "@/components/ui/card";
-import { DailyChallenge } from '@/services/dailyChallengesService';
 
 interface ConceptReviewContent {
   concept: string;
@@ -17,7 +16,7 @@ interface ConceptReviewContent {
 }
 
 interface ConceptReviewChallengeProps {
-  challenge: DailyChallenge;
+  challenge: ConceptReviewContent;
   onComplete: (score: number, isCorrect?: boolean) => void;
   onCancel: () => void;
 }
@@ -27,20 +26,12 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
   onComplete, 
   onCancel 
 }) => {
-  // Extract content from challenge
-  const content = challenge.content as ConceptReviewContent;
-  
   const [answer, setAnswer] = useState<string>('');
   const [showKeyPoints, setShowKeyPoints] = useState<boolean>(false);
   const [showExample, setShowExample] = useState<boolean>(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [timeLeft, setTimeLeft] = useState<number>(300); // 5 minutes
   const [score, setScore] = useState<number>(0);
-  
-  // Log challenge content to help with debugging
-  useEffect(() => {
-    
-  }, [content]);
   
   // Setup timer
   useEffect(() => {
@@ -145,15 +136,15 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
       
       <Card className="bg-card/30 backdrop-blur-sm mb-6 border-primary/20">
         <CardContent className="p-4">
-          <h3 className="text-xl font-medium text-primary mb-2">{content.concept}</h3>
-          <p className="mb-4 text-foreground/80">{content.description}</p>
+          <h3 className="text-xl font-medium text-primary mb-2">{challenge.concept}</h3>
+          <p className="mb-4 text-foreground/80">{challenge.description}</p>
           
           <div className="bg-card/30 backdrop-blur-sm p-4 rounded-lg border border-border/40 mb-4">
             <h4 className="font-medium mb-2 flex items-center">
               <Info className="h-4 w-4 mr-2 text-blue-400" />
               Challenge Question:
             </h4>
-            <p className="text-foreground/90 font-medium">{content.questionPrompt}</p>
+            <p className="text-foreground/90 font-medium">{challenge.questionPrompt}</p>
           </div>
         </CardContent>
       </Card>
@@ -185,7 +176,7 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
                   </AccordionTrigger>
                   <AccordionContent className="bg-card/10 rounded-lg mt-2 p-3 border border-border/20">
                     <ul className="space-y-2 list-disc pl-5">
-                      {content.keyPoints.map((point: string, index: number) => (
+                      {challenge.keyPoints.map((point: string, index: number) => (
                         <li key={index} className="text-sm">{point}</li>
                       ))}
                     </ul>
@@ -198,25 +189,20 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
                     className="py-2 px-3 text-sm bg-card/30 rounded-lg hover:bg-card/50 transition-all"
                   >
                     <div className="flex items-center">
-                      <Info className="h-4 w-4 mr-2 text-blue-400" />
+                      <ArrowDownCircle className="h-4 w-4 mr-2 text-blue-400" />
                       <span>Show Practical Example</span>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent className="bg-card/10 rounded-lg mt-2 p-3 border border-border/20">
-                    <p className="text-sm">{content.practicalExample}</p>
+                    <p className="text-sm">{challenge.practicalExample}</p>
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
-              
-              <p className="text-xs text-foreground/60 italic">
-                Note: Using hints will reduce your score
-              </p>
             </div>
             
             <Button 
-              className="neon-button"
               onClick={handleSubmit}
-              disabled={!answer.trim()}
+              disabled={!answer.trim() || submitted}
             >
               Submit Answer
             </Button>
@@ -224,40 +210,29 @@ const ConceptReviewChallenge: React.FC<ConceptReviewChallengeProps> = ({
         </>
       ) : (
         <motion.div 
-          className="mt-6 p-4 rounded-md bg-green-500/20"
+          className="p-4 rounded-md bg-green-500/20 border border-green-500/30 mb-6"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <div className="flex items-center mb-4">
+          <div className="flex items-center mb-3">
             <Check className="h-5 w-5 text-green-500 mr-2" />
-            <h3 className="text-lg font-medium text-green-500">Answer Submitted!</h3>
+            <h3 className="font-medium text-green-500">Answer Submitted!</h3>
           </div>
           
-          <div className="mb-4">
-            <p className="font-medium mb-2">Key points to remember about {content.concept}:</p>
-            <ul className="space-y-2 list-disc pl-5">
-              {content.keyPoints.map((point: string, index: number) => (
-                <li key={index}>{point}</li>
-              ))}
-            </ul>
-          </div>
+          <p className="mb-4 text-sm">
+            Thank you for reviewing this concept and submitting your answer. Your response has been recorded.
+          </p>
           
-          <div className="mb-4">
-            <p className="font-medium mb-2">Practical example:</p>
-            <p>{content.practicalExample}</p>
-          </div>
-          
-          <div className="mt-4 pt-4 border-t border-border/40">
-            <p className="text-sm mb-2">You earned:</p>
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-1">
-                <Trophy className="h-4 w-4 text-yellow-500" />
-                <span className="font-medium">{score} points</span>
-              </div>
-            </div>
+          <div className="flex items-center mt-2">
+            <Trophy className="h-4 w-4 text-yellow-500 mr-2" />
+            <span className="font-medium">Score: {score} points</span>
           </div>
         </motion.div>
       )}
+      
+      <div className="text-sm text-foreground/60 mt-6">
+        <p>Note: Your understanding of blockchain concepts is essential for building secure and efficient applications. Take your time to absorb the information.</p>
+      </div>
     </div>
   );
 };

@@ -16,6 +16,8 @@ import CodePuzzleChallenge from './challenge-types/CodePuzzleChallenge';
 import QuizChallenge from './challenge-types/QuizChallenge';
 import ConceptReviewChallenge from './challenge-types/ConceptReviewChallenge';
 import SecurityAuditChallenge from './challenge-types/SecurityAuditChallenge';
+import DeFiScenarioChallenge from './challenge-types/DeFiScenarioChallenge';
+import OptimizationChallenge from './challenge-types/OptimizationChallenge';
 import Confetti from './ui/confetti';
 
 // Create a VisuallyHidden component for accessibility
@@ -111,7 +113,7 @@ const ChallengeRunner: React.FC<ChallengeRunnerProps> = ({
       case 'code_puzzle':
         return (
           <CodePuzzleChallenge
-            challenge={challenge}
+            challenge={challenge.content}
             onComplete={handleComplete}
             onCancel={onCancel}
           />
@@ -120,7 +122,7 @@ const ChallengeRunner: React.FC<ChallengeRunnerProps> = ({
       case 'quiz':
         return (
           <QuizChallenge
-            challenge={challenge}
+            challenge={challenge.content}
             onComplete={handleComplete}
             onCancel={onCancel}
           />
@@ -129,7 +131,7 @@ const ChallengeRunner: React.FC<ChallengeRunnerProps> = ({
       case 'concept_review':
         return (
           <ConceptReviewChallenge
-            challenge={challenge}
+            challenge={challenge.content}
             onComplete={handleComplete}
             onCancel={onCancel}
           />
@@ -138,7 +140,25 @@ const ChallengeRunner: React.FC<ChallengeRunnerProps> = ({
       case 'security_audit':
         return (
           <SecurityAuditChallenge
-            challenge={challenge}
+            challenge={challenge.content}
+            onComplete={handleComplete}
+            onCancel={onCancel}
+          />
+        );
+      
+      case 'defi_scenario':
+        return (
+          <DeFiScenarioChallenge
+            challenge={challenge.content}
+            onComplete={handleComplete}
+            onCancel={onCancel}
+          />
+        );
+        
+      case 'optimization':
+        return (
+          <OptimizationChallenge
+            challenge={challenge.content}
             onComplete={handleComplete}
             onCancel={onCancel}
           />

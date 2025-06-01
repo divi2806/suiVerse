@@ -23,6 +23,7 @@ interface ModuleCompletionPopupProps {
   walletAddress: string;
   xpEarned: number;
   suiEarned: number;
+  quizScore?: number;
 }
 
 const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
@@ -32,7 +33,8 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
   moduleName,
   walletAddress,
   xpEarned,
-  suiEarned
+  suiEarned,
+  quizScore
 }) => {
   const [isMinting, setIsMinting] = useState(false);
   const [mintingSuccess, setMintingSuccess] = useState(false);
@@ -53,89 +55,66 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
   // Generate NFT image URL using DiceBear
   const nftImageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${moduleId}`;
 
-  // Mint NFT automatically when popup opens
+  // Display a normalized quiz score (capped at 100%)
+  const normalizedQuizScore = typeof quizScore === 'number' 
+    ? Math.min(quizScore, 100) 
+    : quizScore || 0;
+
+  // Trigger confetti when popup opens
   useEffect(() => {
-    if (isOpen && activeWalletAddress) {
+    if (isOpen) {
+      // Trigger confetti
+      confetti({
+        particleCount: 200,
+        spread: 90,
+        origin: { x: 0.5, y: 0.3 }
+      });
       
+      // Start NFT minting when popup opens if user has a wallet connected
+      console.log(`[NFT] Popup opened for module ${moduleId}, wallet address: ${activeWalletAddress}`);
       
-      // Always force a retry for test-wallet addresses or when address contains "test"
-      const isTestWallet = activeWalletAddress === 'test-wallet' || activeWalletAddress.toLowerCase().includes('test');
-      if (isTestWallet) {
-        
-        setIsMinting(false);
-        setMintingSuccess(false);
-        setMintingError(null);
-        // Give a small delay to ensure state is updated
-        setTimeout(() => {
-          
-          mintNFT();
-        }, 100);
-        return;
-      }
+      // Reset state on each open
+      setMintingSuccess(false);
+      setMintingError(null);
       
-      if (!isMinting && !mintingSuccess && !mintingError) {
-        
+      // Delay slightly to ensure popup is fully rendered
+      setTimeout(() => {
+        console.log(`[NFT] Starting mint process for module ${moduleId}`);
+        setIsMinting(true);
         mintNFT();
-      } else {
-        
-      }
-    } else {
-      
+      }, 500);
     }
-  }, [isOpen, activeWalletAddress]);
+  }, [isOpen, moduleId, activeWalletAddress]);
 
   // Handle NFT minting
   const mintNFT = async () => {
     try {
-      setIsMinting(true);
       setMintingError(null);
 
-      
-      
+      console.log(`[NFT] Starting mint for module ${moduleId}, wallet: ${activeWalletAddress}`);
       
       // Extra validation for wallet address
       if (!activeWalletAddress || activeWalletAddress === 'undefined' || activeWalletAddress === 'null') {
-        
-        setMintingError('Invalid wallet address');
+        console.error(`[NFT] Invalid wallet address: ${activeWalletAddress}`);
+        setMintingError('Invalid wallet address. Please connect your wallet.');
         setIsMinting(false);
         return;
       }
       
-      // Special handling for test wallet
-      const isTestWallet = activeWalletAddress === 'test-wallet' || activeWalletAddress.toLowerCase().includes('test');
-      
-      // If wallet isn't connected and NOT a test wallet, show error
-      if (!isWalletConnected && !isTestWallet) {
-        
+      // If wallet isn't connected, show error
+      if (!isWalletConnected) {
+        console.error(`[NFT] Wallet not connected`);
         setMintingError('Wallet not connected. Please connect your wallet first.');
         setIsMinting(false);
         return;
       }
       
-      // Special handling for test wallet
-      if (isTestWallet) {
-        
-        // Simulate successful minting
-        setTimeout(() => {
-          setMintingSuccess(true);
-          setNftId(`test-nft-${Date.now()}`);
-          setTxDigest(`test-tx-${Date.now()}`);
-          
-          // Trigger confetti for successful minting
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { x: 0.5, y: 0.5 }
-          });
-        }, 2000);
-        return;
-      }
-      
       // Get the transaction to sign
+      console.log(`[NFT] Requesting mint transaction for module ${moduleId}`);
       const result = await mintModuleCompletionNFT(activeWalletAddress, moduleId);
       
       if (result.success && result.transaction) {
-        
+        console.log(`[NFT] Transaction created successfully, preparing for wallet signing`);
         
         try {
           // We need to convert the TransactionBlock to the format expected by @mysten/dapp-kit
@@ -145,8 +124,9 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
           // Set the sender address explicitly to avoid the "Missing transaction sender" error
           tx.setSender(activeWalletAddress);
           
-          // Serialize and build the transaction the way dapp-kit expects it
+          // Build the transaction the way dapp-kit expects it
           const builtTx = await tx.build({ client: suiClient });
+          console.log(`[NFT] Transaction built, requesting wallet signature`);
           
           // Sign and execute transaction with the dapp-kit
           const response = await signAndExecuteTransaction.mutateAsync({
@@ -154,19 +134,19 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
             transaction: btoa(String.fromCharCode(...new Uint8Array(builtTx)))
           });
           
-          
+          console.log(`[NFT] Transaction signed and executed successfully:`, response);
           
           // Get transaction digest
           const txDigest = response.digest;
+          console.log(`[NFT] Transaction digest: ${txDigest}`);
           
           // Record the successful mint in Firestore
-          // Since objectChanges aren't available in signAndExecuteTransaction response,
-          // we'll need to query for the created NFT later or pass null for now
           await recordSuccessfulMint(
             activeWalletAddress,
             moduleId,
             txDigest
           );
+          console.log(`[NFT] Mint recorded in database`);
           
           // Update UI state
           setMintingSuccess(true);
@@ -179,18 +159,25 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
             origin: { x: 0.5, y: 0.5 }
           });
         } catch (walletError) {
-          
+          console.error(`[NFT] Wallet error during transaction:`, walletError);
           setMintingError(walletError instanceof Error ? 
             `Wallet error: ${walletError.message}` : 
-            'Error during wallet transaction'
+            'Error during wallet transaction. Please try again.'
           );
         }
       } else {
+        console.error(`[NFT] Failed to create transaction:`, result.message);
         
-        setMintingError(result.message || 'Failed to create minting transaction');
+        // Check if this is a duplicate NFT error
+        if (result.message && result.message.includes('already own')) {
+          setMintingSuccess(true); // Still show success since user has the NFT
+          setMintingError(`You already own this NFT. Check your inventory.`);
+        } else {
+          setMintingError(result.message || 'Failed to create minting transaction');
+        }
       }
     } catch (error) {
-      
+      console.error(`[NFT] Unexpected error during minting:`, error);
       setMintingError(error instanceof Error ? error.message : 'An unexpected error occurred');
     } finally {
       setIsMinting(false);
@@ -214,18 +201,6 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
     }
   };
 
-  // Trigger confetti when popup opens
-  useEffect(() => {
-    if (isOpen) {
-      
-      confetti({
-        particleCount: 200,
-        spread: 90,
-        origin: { x: 0.5, y: 0.3 }
-      });
-    }
-  }, [isOpen]);
-
   // Add global function for direct access
   useEffect(() => {
     const win = window as any;
@@ -238,7 +213,8 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
         moduleName: data.moduleName || 'Unknown Module',
         walletAddress: data.walletAddress || 'unknown',
         xpEarned: data.xpEarned || 0,
-        suiEarned: data.suiEarned || 0
+        suiEarned: data.suiEarned || 0,
+        quizScore: data.quizScore || 0
       };
       
       // Force the popup to open by updating state
@@ -248,139 +224,139 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
       
       // Use setTimeout to ensure this runs after current execution cycle
       setTimeout(() => {
-        
-        // This line will directly open the popup without relying on other components
-        document.dispatchEvent(new CustomEvent('forceModulePopup', { detail: popupData }));
-      }, 10);
+        mintNFT();
+      }, 300);
     };
     
     return () => {
-      delete win.showDirectModuleCompletionPopup;
+      delete (window as any).showDirectModuleCompletionPopup;
     };
   }, []);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-gradient-to-br from-background/95 to-background/80 border border-primary/20 rounded-xl p-6 max-w-md w-full mx-4 shadow-xl backdrop-blur-sm"
+    <motion.div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm overflow-y-auto py-8"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div 
+        className="relative max-w-md w-full bg-card/90 backdrop-blur-md p-6 rounded-xl border border-border shadow-xl mx-4 my-auto"
+        initial={{ scale: 0.95, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        transition={{ type: "spring", bounce: 0.4 }}
       >
-        {/* Header */}
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-primary/20 p-2 rounded-full">
-              <Award className="h-6 w-6 text-primary" />
-            </div>
-            <h2 className="text-xl font-bold">Module Completed!</h2>
+        <button 
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1 rounded-full hover:bg-muted transition-colors"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        
+        <div className="text-center mb-6">
+          <div className="mx-auto w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
+            <Award className="h-8 w-8 text-primary" />
           </div>
-          <button 
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <h2 className="text-2xl font-bold mb-1">Mission Complete!</h2>
+          <p className="text-muted-foreground">You've completed {moduleName}</p>
         </div>
-
-        {/* Content */}
-        <div className="space-y-4">
-          <div className="text-center">
-            <h3 className="text-lg font-semibold text-primary mb-1">{moduleName}</h3>
-            <p className="text-muted-foreground">
-              Congratulations on completing this module! You've earned:
-            </p>
-          </div>
-
-          {/* Rewards */}
-          <div className="grid grid-cols-2 gap-4 my-4">
-            <div className="bg-background/50 rounded-lg p-3 text-center">
+        
+        <div className="module-summary text-center mb-6">
+          <h3 className="text-xl font-semibold mb-2">Module Summary</h3>
+          <div className="flex justify-center gap-8 mt-4">
+            <div className="text-center">
+              <span className="text-3xl font-bold text-primary">{xpEarned}</span>
               <p className="text-sm text-muted-foreground">XP Earned</p>
-              <p className="text-xl font-bold text-yellow-500">+{xpEarned}</p>
             </div>
-            <div className="bg-background/50 rounded-lg p-3 text-center">
-              <p className="text-sm text-muted-foreground">SUI Earned</p>
-              <p className="text-xl font-bold text-blue-500">+{suiEarned}</p>
+            {quizScore !== undefined && (
+              <div className="text-center">
+                <span className="text-3xl font-bold text-pink-500">
+                  {normalizedQuizScore}%
+                </span>
+                <p className="text-sm text-muted-foreground">Quiz Score</p>
+              </div>
+            )}
+            <div className="text-center">
+              <span className="text-3xl font-bold text-blue-400">{suiEarned}</span>
+              <p className="text-sm text-muted-foreground">SUI Tokens</p>
             </div>
           </div>
-
-          {/* NFT Preview */}
-          <div className="bg-black/20 rounded-lg p-4 flex flex-col items-center">
-            <p className="text-sm text-center mb-3">
-              {isMinting 
-                ? "Minting your achievement NFT..." 
-                : mintingSuccess 
-                  ? "Your achievement NFT has been minted!" 
-                  : mintingError 
-                    ? "Failed to mint achievement NFT" 
-                    : "Achievement NFT for module completion"}
-            </p>
-            <div className="w-32 h-32 mb-3 rounded-lg overflow-hidden bg-gradient-to-br from-primary/20 to-secondary/20 p-1">
-              <img
-                src={nftImageUrl}
-                alt={`Module ${moduleId} NFT`}
-                className="w-full h-full object-cover rounded-md"
+        </div>
+        
+        <div className="border-t border-border/50 pt-6 mt-4">
+          <h3 className="text-xl font-semibold mb-4 text-center">Achievement NFT</h3>
+          
+          <div className="bg-black/40 rounded-lg p-4 mb-4">
+            <div className="aspect-square max-w-[180px] mx-auto relative mb-3 border-2 border-primary/50 rounded-lg overflow-hidden shadow-glow">
+              <img 
+                src={nftImageUrl} 
+                alt="Module Completion NFT" 
+                className="w-full h-full object-cover"
               />
+              
+              {/* Overlay for minting status */}
+              {isMinting && (
+                <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                  <div className="text-center">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2 text-primary" />
+                    <p className="text-sm font-medium">Minting NFT...</p>
+                  </div>
+                </div>
+              )}
+              
+              {mintingSuccess && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                  <div className="p-2 rounded-full bg-green-500/20 mb-1">
+                    <Check className="h-8 w-8 text-green-500" />
+                  </div>
+                </div>
+              )}
             </div>
             
-            {isMinting ? (
-              <Button 
-                disabled={true}
-                className="w-full"
-                variant="default"
-              >
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Minting in progress...
-              </Button>
-            ) : mintingSuccess ? (
-              <Button 
-                onClick={viewOnExplorer}
-                className="w-full"
-                variant="outline"
-              >
-                <Check className="mr-2 h-4 w-4 text-green-500" />
-                View on Explorer
-              </Button>
-            ) : (
-              <Button 
-                onClick={mintNFT} 
-                disabled={isMinting || (!isWalletConnected && activeWalletAddress !== 'test-wallet')}
-                className="w-full"
-                variant="default"
-              >
-                {isWalletConnected ? 'Mint Achievement NFT' : 'Connect Wallet to Mint'}
-              </Button>
-            )}
+            <h4 className="text-lg font-semibold text-center mb-1">Module {moduleId} Master</h4>
+            <p className="text-sm text-center text-muted-foreground mb-4">
+              Awarded for completing {moduleName}
+            </p>
             
-            {mintingError && (
-              <p className="text-red-500 text-sm mt-2">{mintingError}</p>
-            )}
-            
-            {/* Force Mint button for admins and testing */}
-            <Button 
-              onClick={() => {
-                // Reset state and force mint
-                setIsMinting(false);
-                setMintingSuccess(false);
-                setMintingError(null);
-                
-                setTimeout(() => mintNFT(), 50);
-              }}
-              className="w-full mt-2 bg-yellow-600 hover:bg-yellow-700 text-white"
-              variant="outline"
-            >
-              Force Mint NFT
-            </Button>
+            <div className="space-y-2">
+              {mintingError && (
+                <div className="bg-destructive/20 text-destructive text-sm p-3 rounded-md">
+                  {mintingError}
+                </div>
+              )}
+              
+              {mintingSuccess && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full"
+                  onClick={viewOnExplorer}
+                >
+                  View on Sui Explorer
+                </Button>
+              )}
+              
+              {isMinting && (
+                <p className="text-xs text-center text-muted-foreground">
+                  Please confirm the transaction in your wallet...
+                </p>
+              )}
+            </div>
           </div>
-
-          <div className="text-center text-sm text-muted-foreground mt-4">
-            <p>Continue your journey through the Sui universe!</p>
-          </div>
+        </div>
+        
+        <div className="mt-6 text-center">
+          <Button onClick={onClose} className="w-full">
+            Continue
+          </Button>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Your progress has been saved
+          </p>
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 };
 

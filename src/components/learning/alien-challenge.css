@@ -1,6 +1,32 @@
 .space-stars {
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  background-image: 
+    radial-gradient(2px 2px at 20px 30px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 40px 70px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 60px 110px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 80px 150px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 100px 190px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 120px 230px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 140px 270px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 160px 310px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 180px 350px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 200px 390px, #fff, rgba(0,0,0,0));
+  background-size: 200px 400px;
+  animation: moveBg 60s linear infinite;
+}
+
+@keyframes moveBg {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 0% 100%;
+  }
 }
 
 .loading {
@@ -18,14 +44,28 @@
 }
 
 .battle-animation-container {
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
   position: relative;
   overflow: hidden;
 }
 
 .battle-scene {
-  width: 100%;
-  height: 100%;
   position: relative;
+  width: 100%;
+  height: 200px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 50px;
+}
+
+.battle-text {
+  text-align: center;
+  margin-top: 1rem;
 }
 
 .alien-ship {
@@ -157,4 +197,267 @@
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Galaxy card styling */
+.galaxy-card {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.1) 0%,
+    rgba(147, 51, 234, 0.1) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+/* Alien styles */
+.alien {
+  position: relative;
+  animation: floatAlien 3s ease-in-out infinite;
+}
+
+.alien-body {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border-radius: 50% 50% 30% 30%;
+  position: relative;
+  box-shadow: 0 0 20px rgba(147, 51, 234, 0.6);
+}
+
+.alien-eyes {
+  position: absolute;
+  top: 25px;
+  left: 15px;
+  width: 50px;
+  height: 15px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.alien-eyes::before,
+.alien-eyes::after {
+  content: '';
+  width: 15px;
+  height: 15px;
+  background: #000;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.8) inset;
+  animation: blinkEyes 4s infinite;
+}
+
+.alien-tentacles {
+  position: absolute;
+  bottom: -10px;
+  left: 15px;
+  width: 50px;
+  height: 15px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.alien-tentacles::before,
+.alien-tentacles::after {
+  content: '';
+  width: 10px;
+  height: 25px;
+  background: linear-gradient(to bottom, #6366f1, transparent);
+  border-radius: 10px 10px 0 0;
+  animation: moveTentacles 2s ease-in-out infinite alternate;
+}
+
+/* Code warrior styles */
+.code-warrior {
+  position: relative;
+  animation: floatWarrior 3s ease-in-out infinite;
+}
+
+.code-warrior-body {
+  width: 70px;
+  height: 100px;
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  border-radius: 30px 30px 40px 40px;
+  position: relative;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+}
+
+.code-warrior-helmet {
+  position: absolute;
+  top: -25px;
+  left: 10px;
+  width: 50px;
+  height: 50px;
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  border-radius: 50% 50% 15px 15px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.code-warrior-helmet::before {
+  content: '';
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  width: 20px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  animation: helmetGlow 2s infinite;
+}
+
+.code-warrior-weapon {
+  position: absolute;
+  top: 40px;
+  right: -15px;
+  width: 50px;
+  height: 8px;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.8);
+}
+
+.code-warrior-weapon::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: -2px;
+  width: 12px;
+  height: 12px;
+  background: #60a5fa;
+  border-radius: 50%;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 1);
+  animation: weaponPulse 1.5s infinite;
+}
+
+/* Battle effects */
+.battle-effects {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.battle-effects::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 30%;
+  right: 30%;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.8), transparent);
+  animation: laserBeam 2s infinite;
+  opacity: 0;
+}
+
+/* Success and failure glows */
+.success-glow {
+  position: relative;
+}
+
+.success-glow::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  background: radial-gradient(circle, rgba(34, 197, 94, 0.5) 0%, rgba(34, 197, 94, 0) 70%);
+  border-radius: 50%;
+  animation: successPulse 2s infinite;
+  z-index: -1;
+}
+
+.failure-glow {
+  position: relative;
+}
+
+.failure-glow::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.5) 0%, rgba(239, 68, 68, 0) 70%);
+  border-radius: 50%;
+  animation: failurePulse 2s infinite;
+  z-index: -1;
+}
+
+/* Animations */
+@keyframes floatAlien {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes floatWarrior {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes blinkEyes {
+  0%, 48%, 52%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.1); }
+}
+
+@keyframes moveTentacles {
+  0% { transform: scaleY(1) translateY(0); }
+  100% { transform: scaleY(1.2) translateY(5px); }
+}
+
+@keyframes helmetGlow {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+@keyframes weaponPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 15px rgba(59, 130, 246, 1); }
+  50% { transform: scale(1.2); box-shadow: 0 0 25px rgba(59, 130, 246, 1); }
+}
+
+@keyframes laserBeam {
+  0% { transform: scaleY(1); opacity: 0; }
+  20% { transform: scaleY(1); opacity: 1; }
+  40% { transform: scaleY(3); opacity: 0.8; }
+  60% { transform: scaleY(1); opacity: 0.6; }
+  80% { transform: scaleY(2); opacity: 0.4; }
+  100% { transform: scaleY(1); opacity: 0; }
+}
+
+@keyframes successPulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes failurePulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* Neon button glow */
+.neon-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.neon-button::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(147, 51, 234, 0.3) 0%, rgba(0,0,0,0) 70%);
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.neon-button:hover::after {
+  opacity: 1;
+  transform: scale(1);
 } 

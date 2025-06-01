@@ -33,6 +33,7 @@ interface DailyChallengesProps {
   onClaimReward: (challengeId: string) => void;
   walletAddress?: string;
   userId?: string;
+  loading?: boolean;
 }
 
 const DailyChallenges: React.FC<DailyChallengesProps> = ({ 
@@ -40,7 +41,8 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
   onStartChallenge, 
   onClaimReward,
   walletAddress,
-  userId
+  userId,
+  loading = false
 }) => {
   const { toast } = useToast();
   const [timeRemaining, setTimeRemaining] = useState<string>("24h 00m");
@@ -360,7 +362,12 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
         </div>
       </div>
 
-      {challenges.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center py-12 border border-dashed border-primary/30 rounded-lg">
+          <Loader2 className="h-8 w-8 text-primary/60 animate-spin mr-3" />
+          <p className="text-foreground/70">Loading challenges...</p>
+        </div>
+      ) : challenges.length === 0 ? (
         <div className="text-center py-8 border border-dashed border-primary/30 rounded-lg">
           <Calendar className="h-12 w-12 text-primary/40 mx-auto mb-2" />
           <p className="text-foreground/70">
@@ -371,9 +378,9 @@ const DailyChallenges: React.FC<DailyChallengesProps> = ({
           )}
         </div>
       ) : (
-        challenges.map((challenge) => (
+        challenges.map((challenge, index) => (
           <motion.div 
-            key={challenge.id}
+            key={`${challenge.id}-${index}`}
             className="galaxy-card p-4 border border-primary/20"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}

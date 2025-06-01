@@ -92,6 +92,7 @@ export const getDailySeed = (): string => {
 };
 
 // Get challenge types for today based on the daily seed
+// Always returns exactly 3 challenge types
 export const getChallengeCategoriesForToday = (): ChallengeType[] => {
   const allTypes: ChallengeType[] = [
     'code_puzzle', 
@@ -116,7 +117,16 @@ export const getChallengeCategoriesForToday = (): ChallengeType[] => {
     tempTypes = tempTypes.filter((_, j) => j !== index);
   }
   
-  return selectedTypes;
+  // Ensure we always return exactly 3 types
+  if (selectedTypes.length < 3) {
+    // If somehow we got fewer than 3 (shouldn't happen), add some defaults
+    const defaultTypes: ChallengeType[] = ['quiz', 'code_puzzle', 'concept_review'];
+    for (let i = selectedTypes.length; i < 3; i++) {
+      selectedTypes.push(defaultTypes[i % defaultTypes.length]);
+    }
+  }
+  
+  return selectedTypes.slice(0, 3); // Guarantee exactly 3 types
 };
 
 // Enhanced logging for Gemini API responses
@@ -1072,11 +1082,14 @@ export const ensureDailyChallengesExist = async (walletAddress: string): Promise
 // Generate daily challenges and store in Firestore
 export const generateDailyChallenges = async (walletAddress: string): Promise<DailyChallenge[]> => {
   try {
-    // Get today's challenge categories
-    const challengeTypes = getChallengeCategoriesForToday();
+    // Get today's challenge categories - limit to exactly 3
+    const challengeTypes = getChallengeCategoriesForToday().slice(0, 3);
+    
+    // Get today's date string in YYYY-MM-DD format for the document ID
+    const todayString = getTodayAtMidnightUTC().toISOString().split('T')[0];
     
     // Get the global daily challenges document
-    const globalChallengesRef = doc(db, 'globalChallenges', getTodayAtMidnightUTC().toISOString().split('T')[0]);
+    const globalChallengesRef = doc(db, 'globalChallenges', todayString);
     const globalChallengesDoc = await getDoc(globalChallengesRef);
     
     let challenges: DailyChallenge[] = [];
@@ -1085,13 +1098,39 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
     if (globalChallengesDoc.exists()) {
       // Use the pre-generated global challenges
       challenges = globalChallengesDoc.data().challenges;
+      
+      // Ensure we have exactly 3 challenges
+      if (challenges.length > 3) {
+        challenges = challenges.slice(0, 3);
+      } else if (challenges.length < 3) {
+        // Fill with fallback challenges if somehow we have fewer than 3
+        const fallbackChallenges = getFallbackChallenges().slice(0, 3 - challenges.length);
+        challenges = [...challenges, ...fallbackChallenges];
+      }
+      
+      // Verify that challenge types are valid, replace invalid ones
+      challenges = challenges.map(challenge => {
+        if (!isValidChallengeType(challenge.type)) {
+          const replacementType = getReplacementChallengeType(challenge.type);
+          const difficulty = challenge.difficulty || 'medium';
+          
+          // Create replacement challenge with valid type
+          return {
+            ...challenge,
+            type: replacementType,
+            title: getChallengeTitle(replacementType, difficulty),
+            description: getChallengeDescription(replacementType, difficulty),
+            content: getMultipleFallbackContent(replacementType, difficulty)
+          };
+        }
+        return challenge;
+      });
     } else {
       // Try to generate fresh challenges with Gemini
       let useHardcodedChallenges = false;
       
       try {
         // Generate fresh challenges
-        const batch = writeBatch(db);
         challenges = [];
         
         // For each challenge type, generate content
@@ -1108,15 +1147,18 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
           while (retryCount < maxRetries) {
             try {
               content = await generateChallengeContent(type, difficulty);
-              // If we got here, generation succeeded
-              break;
+              // Validate the content
+              if (isValidChallengeContent(content, type)) {
+                // If we got here, generation succeeded
+                break;
+              } else {
+                throw new Error(`Invalid challenge content for type ${type}`);
+              }
             } catch (error) {
               retryCount++;
               
-              
               if (retryCount >= maxRetries) {
                 // All retries failed, use fallback content
-                
                 content = getMultipleFallbackContent(type, difficulty);
               } else {
                 // Wait a bit before retrying
@@ -1125,9 +1167,10 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
             }
           }
           
-          // Create challenge object
+          // Create challenge object with truly unique ID
+          const randomSuffix = Math.floor(Math.random() * 1000000).toString(); // Add random number for uniqueness
           const challenge: DailyChallenge = {
-            id: `${type}-${getDailySeed()}-${i}`,
+            id: `${type}-${getDailySeed()}-${i}-${randomSuffix}`,
             title: getChallengeTitle(type, difficulty),
             description: getChallengeDescription(type, difficulty),
             type,
@@ -1142,28 +1185,42 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
           
           challenges.push(challenge);
         }
-      } catch (error) {
         
+        // Ensure we have exactly 3 challenges
+        if (challenges.length !== 3) {
+          useHardcodedChallenges = true;
+        }
+      } catch (error) {
         useHardcodedChallenges = true;
       }
       
       // If we failed to generate challenges with Gemini, use hardcoded ones
-      if (useHardcodedChallenges || challenges.length < 3) {
-        
-        challenges = getFallbackChallenges();
+      if (useHardcodedChallenges || challenges.length !== 3) {
+        challenges = getFallbackChallenges().slice(0, 3); // Ensure exactly 3 challenges
       }
       
       // Store the global challenges for other users
-      await setDoc(globalChallengesRef, {
-        challenges,
-        dateCreated: getTodayAtMidnightUTC(),
-        expiresAt: getTomorrowAtMidnightUTC()
-      });
+      try {
+        await setDoc(globalChallengesRef, {
+          challenges,
+          dateCreated: getTodayAtMidnightUTC(),
+          expiresAt: getTomorrowAtMidnightUTC()
+        });
+      } catch (error) {
+        // Continue with the generated challenges even if saving fails
+      }
     }
     
     // Now assign these challenges to the user
     const userChallengesRef = collection(db, 'dailyChallenges');
     const batch = writeBatch(db);
+    
+    // Make sure we have exactly 3 challenges
+    challenges = challenges.slice(0, 3);
+    while (challenges.length < 3) {
+      const fallback = getFallbackChallenges()[challenges.length % getFallbackChallenges().length];
+      challenges.push(fallback);
+    }
     
     for (const challenge of challenges) {
       const userChallengeRef = doc(userChallengesRef);
@@ -1181,14 +1238,13 @@ export const generateDailyChallenges = async (walletAddress: string): Promise<Da
     // Add user challenges to user's progress tracking
     await updateDoc(doc(db, 'learningProgress', walletAddress), {
       lastChallengeGeneration: serverTimestamp(),
-      totalDailyChallenges: challenges.length
+      totalDailyChallenges: 3 // Always set to exactly 3
     });
     
     return challenges;
   } catch (error) {
-    
     // Return fallback challenges even if storing to Firestore fails
-    return getFallbackChallenges();
+    return getFallbackChallenges().slice(0, 3); // Ensure exactly 3 challenges
   }
 };
 
@@ -1397,22 +1453,17 @@ export const completeChallengeAndClaimRewards = async (
   }
 };
 
-// Get all daily challenges for a user
+// Get user's daily challenges for today
 export const getUserDailyChallenges = async (walletAddress: string): Promise<DailyChallenge[]> => {
   try {
-    // Ensure daily challenges exist
-    try {
-      await ensureDailyChallengesExist(walletAddress);
-    } catch (error) {
-      
-      // Return empty challenges instead of failing completely
-      return [];
-    }
+    // First ensure the user has challenges for today
+    await ensureDailyChallengesExist(walletAddress);
     
-    // Get today's challenges
+    // Get today's date range
     const today = getTodayAtMidnightUTC();
     const tomorrow = getTomorrowAtMidnightUTC();
     
+    // Query user challenges for today
     const userChallengesRef = collection(db, 'dailyChallenges');
     const challengesQuery = query(
       userChallengesRef,
@@ -1422,59 +1473,50 @@ export const getUserDailyChallenges = async (walletAddress: string): Promise<Dai
     );
     
     const challengesSnapshot = await getDocs(challengesQuery);
-    
     const challenges: DailyChallenge[] = [];
     
     challengesSnapshot.forEach(doc => {
       try {
         const data = doc.data();
-        const challenge = { 
-          id: doc.id, 
-          ...data 
+        // Use the original challenge ID from the data if it exists, otherwise use doc.id
+        const challenge = {
+          id: data.id || doc.id, // Prefer the original ID if it exists
+          ...data
         } as DailyChallenge;
         
-        // Check if challenge type is valid, replace if not
-        if (!isValidChallengeType(challenge.type)) {
-          
-          
-          // Choose a replacement type based on the challenge id for consistency
-          const idSeed = Array.from(challenge.id).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-          const newType = getReplacementChallengeType(idSeed);
-          
-          // Create a replacement challenge
-          const replacementChallenge: DailyChallenge = {
-            ...challenge,
-            type: newType,
-            title: getChallengeTitle(newType, challenge.difficulty),
-            description: getChallengeDescription(newType, challenge.difficulty),
-            content: getFallbackContent(newType, challenge.difficulty)
-          };
-          
-          challenges.push(replacementChallenge);
-          
-          // Update the challenge in Firestore with the new type
-          updateDoc(doc.ref, {
-            type: newType,
-            title: replacementChallenge.title,
-            description: replacementChallenge.description,
-            content: replacementChallenge.content,
-            lastUpdated: serverTimestamp()
-          }).catch(error => {
-            
-          });
-        } else {
+        // Only include challenge types that we know how to display
+        if (isValidChallengeType(challenge.type)) {
           challenges.push(challenge);
+        } else {
+          // For invalid types, replace with a valid one instead of skipping
+          const replacementType = getReplacementChallengeType(challenge.type);
+          const difficulty = challenge.difficulty || 'medium';
+          
+          challenges.push({
+            ...challenge,
+            type: replacementType,
+            title: getChallengeTitle(replacementType, difficulty),
+            description: getChallengeDescription(replacementType, difficulty),
+            content: getMultipleFallbackContent(replacementType, difficulty)
+          });
         }
-      } catch (docError) {
-        
-        // Skip this document but continue with others
+      } catch (error) {
+        console.error("Error processing challenge document:", error);
       }
     });
     
+    // Ensure we have exactly 3 challenges
+    if (challenges.length > 3) {
+      return challenges.slice(0, 3); 
+    } else if (challenges.length < 3) {
+      // If we have fewer than 3, add fallback challenges
+      const fallbackChallenges = getFallbackChallenges().slice(0, 3 - challenges.length);
+      return [...challenges, ...fallbackChallenges];
+    }
+    
     return challenges;
   } catch (error) {
-    
-    // Return empty array instead of throwing to prevent UI breakage
-    return [];
+    console.error("Error getting user daily challenges:", error);
+    return getFallbackChallenges().slice(0, 3); // Return exactly 3 fallback challenges
   }
 }; 

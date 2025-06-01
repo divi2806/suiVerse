@@ -15,8 +15,34 @@
 }
 
 .space-stars {
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  background-image: 
+    radial-gradient(2px 2px at 20px 30px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 40px 70px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 60px 110px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 80px 150px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 100px 190px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 120px 230px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 140px 270px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 160px 310px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 180px 350px, #fff, rgba(0,0,0,0)),
+    radial-gradient(2px 2px at 200px 390px, #fff, rgba(0,0,0,0));
+  background-size: 200px 400px;
+  animation: moveBg 60s linear infinite;
+}
+
+@keyframes moveBg {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 0% 100%;
+  }
 }
 
 .space-nebula {
@@ -37,12 +63,62 @@
   to { transform: rotate(360deg); }
 }
 
-/* Flashcard animations */
+/* Galaxy card styling */
+.galaxy-card {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.1) 0%,
+    rgba(147, 51, 234, 0.1) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+/* Flashcard styles */
+.flashcard-container {
+  position: relative;
+  perspective: 1000px;
+}
+
 .flashcard {
-  transition: transform 0.6s;
-  transform-style: preserve-3d;
+  cursor: pointer;
+  transition: transform 0.3s ease;
 }
 
 .flashcard:hover {
-  transform: scale(1.02);
+  transform: translateY(-5px);
+  transition: transform 0.3s ease;
+}
+
+/* Code highlighting */
+pre {
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Neon button glow */
+.neon-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.neon-button::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(147, 51, 234, 0.3) 0%, rgba(0,0,0,0) 70%);
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.neon-button:hover::after {
+  opacity: 1;
+  transform: scale(1);
 } 

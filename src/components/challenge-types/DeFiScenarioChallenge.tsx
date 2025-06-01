@@ -44,7 +44,9 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
   onComplete,
   onCancel
 }) => {
-  const [currentStepId, setCurrentStepId] = useState(challenge.firstStepId);
+  // Using startedScenario to track if the user has started the scenario
+  const [startedScenario, setStartedScenario] = useState(false);
+  const [currentStepId, setCurrentStepId] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [decisionHistory, setDecisionHistory] = useState<Array<{
     stepId: string;
@@ -55,15 +57,26 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
   const [isCompleted, setIsCompleted] = useState(false);
   const [score, setScore] = useState(0);
   
-  const currentStep = challenge.steps[currentStepId];
-  const isScenarioOver = !currentStep;
+  // Get current step from steps object if we have a currentStepId
+  const currentStep = currentStepId ? challenge.steps[currentStepId] : null;
+  const isScenarioOver = isCompleted && !currentStep;
+  
+  // Function to begin the scenario
+  const beginScenario = () => {
+    setStartedScenario(true);
+    setCurrentStepId(challenge.firstStepId);
+    setDecisionHistory([]);
+    setShowOutcome(false);
+    setIsCompleted(false);
+    setScore(0);
+  };
   
   const handleOptionSelect = (optionId: string) => {
     setSelectedOption(optionId);
   };
   
   const handleContinue = () => {
-    if (!selectedOption) return;
+    if (!selectedOption || !currentStep) return;
     
     const selectedOptionData = currentStep.options.find(opt => opt.id === selectedOption);
     if (!selectedOptionData) return;
@@ -72,7 +85,7 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
     const newDecisionHistory = [
       ...decisionHistory,
       {
-        stepId: currentStepId,
+        stepId: currentStepId!,
         optionId: selectedOption,
         isCorrect: selectedOptionData.isCorrect
       }
@@ -95,6 +108,8 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
   };
   
   const moveToNextStep = () => {
+    if (!currentStep || !selectedOption) return;
+    
     const selectedOptionData = currentStep.options.find(opt => opt.id === selectedOption);
     if (!selectedOptionData) return;
     
@@ -105,6 +120,7 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
     } else {
       // End of scenario
       setIsCompleted(true);
+      setCurrentStepId(null);
     }
   };
   
@@ -185,12 +201,12 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
         </CardHeader>
         
         <CardContent>
-          {decisionHistory.length === 0 ? (
+          {!startedScenario ? (
             <div className="mb-6">
               <h3 className="text-lg font-medium mb-2">Introduction</h3>
               <p className="text-foreground/80 mb-4">{challenge.introduction}</p>
               <Button 
-                onClick={() => setDecisionHistory([])} 
+                onClick={beginScenario} 
                 className="w-full"
               >
                 Begin Scenario
@@ -205,7 +221,7 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
                 </div>
               </div>
               
-              {!showOutcome ? (
+              {!showOutcome && currentStep ? (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -245,7 +261,7 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
                     Make Decision
                   </Button>
                 </motion.div>
-              ) : (
+              ) : currentStep ? (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -286,7 +302,7 @@ const DeFiScenarioChallenge: React.FC<DeFiScenarioChallengeProps> = ({
                     )}
                   </Button>
                 </motion.div>
-              )}
+              ) : null}
             </div>
           )}
         </CardContent>

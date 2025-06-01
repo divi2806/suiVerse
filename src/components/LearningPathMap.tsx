@@ -229,8 +229,8 @@ const LearningPathMap: React.FC<LearningPathMapProps> = ({
       
       // Galaxy appearance based on state
       const galaxyClasses = cn(
-        "absolute galaxy-node transform -translate-x-1/2 -translate-y-1/2",
-        !galaxy.unlocked ? "opacity-50 cursor-not-allowed" : "opacity-100 hover:scale-110 transition-transform duration-300",
+        "absolute galaxy-node transform -translate-x-1/2 -translate-y-1/2 transition-all duration-300",
+        !galaxy.unlocked ? "opacity-40 hover:opacity-60" : "opacity-100 hover:scale-110 transition-transform",
         galaxy.completed ? "completed-galaxy" : "",
         isCurrent ? "current-galaxy" : ""
       );
@@ -253,7 +253,8 @@ const LearningPathMap: React.FC<LearningPathMapProps> = ({
             <div className="galaxy-label absolute top-full left-1/2 transform -translate-x-1/2 mt-2 w-32 text-center">
               <p className="text-sm font-medium text-foreground bg-background/50 backdrop-blur-sm rounded-md px-2 py-1">{galaxy.name}</p>
               <div className="text-xs text-foreground/70 bg-background/30 backdrop-blur-sm rounded-md px-2 py-0.5 mt-1">
-                {galaxy.modules.filter(m => m.completed).length}/{galaxy.modules.length} Completed
+                {galaxy.modules.filter(m => m.completed).length}/{galaxy.modules.length} Modules
+                {!galaxy.unlocked && <span className="block text-amber-400 mt-0.5">Locked</span>}
               </div>
             </div>
             
@@ -261,6 +262,14 @@ const LearningPathMap: React.FC<LearningPathMapProps> = ({
               <div className="galaxy-stars absolute inset-0"></div>
               <div className="galaxy-core absolute inset-0 flex items-center justify-center">
                 <span className="text-lg font-bold">{galaxy.id}</span>
+                {!galaxy.unlocked && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400">
+                      <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -271,95 +280,125 @@ const LearningPathMap: React.FC<LearningPathMapProps> = ({
   
   // Render modules for all galaxies
   const renderModules = () => {
-    // Create an array to hold all modules from all galaxies
-    const allModules: React.ReactNode[] = [];
-    
-    // Iterate through each galaxy and add its modules
-    galaxies.forEach(galaxy => {
-      // Calculate base vertical offset to prevent overlapping
-      const galaxyModulesCount = galaxy.modules.length;
+    // Check for completed galaxies and ensure next ones are unlocked
+    for (let i = 0; i < galaxies.length - 1; i++) {
+      const currentGalaxy = galaxies[i];
+      const nextGalaxy = galaxies[i + 1];
       
-      galaxy.modules.forEach((module, moduleIndex) => {
+      if (currentGalaxy && nextGalaxy && currentGalaxy.completed && !nextGalaxy.unlocked) {
+        console.log(`[LearningPathMap] Galaxy ${currentGalaxy.id} completed but Galaxy ${nextGalaxy.id} still locked - forcing unlock`);
+        // This is a failsafe - the next galaxy should be unlocked if previous is completed
+        nextGalaxy.unlocked = true;
+        if (nextGalaxy.modules.length > 0) {
+          nextGalaxy.modules[0].locked = false;
+        }
+      }
+    }
+    
+    return galaxies.map(galaxy => {
+      return galaxy.modules.map(module => {
         const isCurrent = module.id === currentModuleId;
+        const moduleX = galaxy.position.x + module.position.x;
+        const moduleY = galaxy.position.y + module.position.y;
         
-        // Select appropriate icon based on module type
-        let ModuleIcon = Circle;
-        let moduleSize = 24;
+        // Determine size based on type
+        const sizeMap = {
+          'planet': 28,
+          'moon': 20,
+          'asteroid': 16,
+          'station': 24,
+          'earth': 32
+        };
         
-        if (module.type === 'earth') {
-          ModuleIcon = Circle; // Using Circle for now, but we'll style it to look like Earth
-          moduleSize = 32; // Make Earth slightly larger
-        }
+        const size = sizeMap[module.type] || 24;
         
-        // Calculate absolute position (galaxy position + module position)
-        const absX = galaxy.position.x + module.position.x;
-        let absY = galaxy.position.y + module.position.y;
+        // Special case: If this is "move-language" module and Genesis Galaxy is completed,
+        // make it clickable regardless of the locked status
+        const isGenesisCompleted = galaxies.find(g => g.id === 1)?.completed;
+        const isMoveLanguageModule = module.id === 'move-language';
+        const forceClickable = isGenesisCompleted && isMoveLanguageModule;
         
-        // For galaxies with multiple modules, spread them vertically to avoid label overlap
-        // Each module will be positioned with more vertical spacing
-        if (galaxyModulesCount > 1) {
-          // Apply vertical offset, more spacing for more modules
-          // For two modules, use current positions
-          // For more than two, distribute them with more space
-          if (galaxyModulesCount > 2) {
-            // Offset factor increases with module index
-            const offsetFactor = moduleIndex - (galaxyModulesCount - 1) / 2;
-            absY += offsetFactor * 100; // Increase vertical spacing
-          }
-        }
-
-        // Styles based on module state
-        const containerClasses = cn(
-          "absolute module-node transform -translate-x-1/2 -translate-y-1/2",
-          module.locked ? "opacity-50" : "opacity-100",
-          isCurrent ? "z-10" : ""
-        );
-
-        // Special styling for Earth
-        const moduleClasses = cn(
-          module.type === 'earth' 
-            ? "w-20 h-20 rounded-full flex items-center justify-center earth-module" 
-            : "w-16 h-16 rounded-full flex items-center justify-center",
-          module.locked ? "cursor-not-allowed" : "cursor-pointer hover:scale-110 transition-transform",
-          // Use the helper function for appropriate colors
-          module.type === 'earth' 
-            ? "bg-blue-500/70" 
-            : getModuleColorClass(module.color, module.completed),
-          isCurrent ? "ring-4 ring-primary animate-pulse" : ""
-        );
-
-        allModules.push(
-          <div 
-            key={`${galaxy.id}-${module.id}`} 
-            className={containerClasses}
-            style={{ 
-              left: absX, 
-              top: absY,
-              animation: isCurrent ? 'float 6s ease-in-out infinite' : 'none',
+        // Only allow clicking if the module's galaxy is unlocked and the module is either completed or not locked
+        // If a module is completed, we should always allow clicking it regardless of locked status
+        // Also allow clicking if we're forcing it clickable (special case for move-language)
+        const isClickable = (galaxy.unlocked && (module.completed || !module.locked)) || forceClickable;
+        
+        return (
+          <div
+            key={`module-${module.id}`}
+            className={cn(
+              "absolute module-node transform -translate-x-1/2 -translate-y-1/2 transition-all duration-300 group",
+              isCurrent ? "z-20" : "z-10",
+              isClickable ? "cursor-pointer hover:scale-110" : "cursor-not-allowed opacity-50"
+            )}
+            style={{
+              left: moduleX,
+              top: moduleY
             }}
           >
-            <Link
-              to={module.locked ? "#" : `/learning/${module.id}`}
-              className={moduleClasses}
-              aria-disabled={module.locked}
-              onClick={(e) => module.locked && e.preventDefault()}
+            {/* Module dot */}
+            <div 
+              className={cn(
+                "rounded-full flex items-center justify-center transition-all",
+                getModuleColorClass(module.color, module.completed),
+                isCurrent ? "ring-4 ring-primary/50 animate-pulse" : ""
+              )}
+              style={{
+                width: `${size}px`,
+                height: `${size}px`
+              }}
             >
-              <div className={module.type === 'earth' 
-                ? "earth-icon w-16 h-16 flex items-center justify-center" 
-                : `${getModuleTextColorClass(module.color)} w-10 h-10 flex items-center justify-center`}>
-                <ModuleIcon size={moduleSize} />
-              </div>
-            </Link>
-            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 w-32 text-center">
-              <p className="text-xs font-medium text-foreground/90 bg-background/50 rounded px-2 py-1 backdrop-blur-sm">{module.title}</p>
-              {module.completed && <Star className="h-3 w-3 text-yellow-500 mx-auto mt-1" />}
+              {module.type === 'planet' && <Circle className={`h-${Math.floor(size/2)}px w-${Math.floor(size/2)}px ${getModuleTextColorClass(module.color)}`} />}
+              {module.type === 'moon' && <Circle className={`h-${Math.floor(size/2)}px w-${Math.floor(size/2)}px ${getModuleTextColorClass(module.color)}`} />}
+              {module.type === 'asteroid' && <Circle className={`h-${Math.floor(size/2)}px w-${Math.floor(size/2)}px ${getModuleTextColorClass(module.color)}`} />}
+              {module.type === 'station' && <Circle className={`h-${Math.floor(size/2)}px w-${Math.floor(size/2)}px ${getModuleTextColorClass(module.color)}`} />}
+              {module.type === 'earth' && <Circle className={`h-${Math.floor(size/2)}px w-${Math.floor(size/2)}px ${getModuleTextColorClass(module.color)}`} />}
             </div>
+            
+            {/* Module tooltip/label that appears on hover */}
+            <div className="absolute left-1/2 -bottom-10 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-30">
+              <div className="bg-card/90 backdrop-blur-sm rounded-md px-3 py-1.5 text-center whitespace-nowrap shadow-lg border border-border/50">
+                <p className="text-sm font-medium">{module.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {forceClickable ? "Available" : module.locked && !module.completed ? "Locked" : module.completed ? "Completed" : "Available"}
+                </p>
+              </div>
+            </div>
+            
+            {/* Status indicator - Only show ONE indicator based on priority: Completed > Current > Locked */}
+            {module.completed ? (
+              <div className="absolute -top-1 -right-1 bg-green-500 rounded-full w-4 h-4 flex items-center justify-center z-20">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </div>
+            ) : module.locked && !module.completed && !forceClickable ? (
+              <div className="absolute -top-1 -right-1 bg-yellow-500 rounded-full w-4 h-4 flex items-center justify-center z-20">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </div>
+            ) : isCurrent ? (
+              <div className="absolute -top-1 -right-1 bg-primary rounded-full w-4 h-4 flex items-center justify-center z-20 animate-pulse">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+              </div>
+            ) : null}
+            
+            {/* Add clickable link if the module is not locked or is completed */}
+            {(isClickable || forceClickable) && (
+              <Link 
+                to={`/learning/${module.id}`}
+                className="absolute inset-0 z-10"
+                aria-label={`Start learning ${module.title}`}
+              />
+            )}
           </div>
         );
       });
     });
-    
-    return allModules;
   };
   
   // Render rocket ship

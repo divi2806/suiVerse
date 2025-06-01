@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 declare global {
   interface Window {
     hasShownStreakModalThisSession?: boolean;
+    showStreakModal?: (details: StreakDetails) => void;
   }
 }
 
@@ -61,7 +62,7 @@ if (typeof window !== 'undefined') {
 // so we can trigger it from anywhere
 let globalShowStreakModal: ((details: StreakDetails) => void) | null = null;
 
-interface StreakDetails {
+export interface StreakDetails {
   streak: number;
   xpEarned: number;
   isMilestone: boolean;
@@ -69,97 +70,8 @@ interface StreakDetails {
   newLevel?: number;
 }
 
-// Export a function that can be called from anywhere
-export const showDailyStreakModal = (details: StreakDetails) => {
-  // Check if this is a login event by checking session storage
-  const isLoginEvent = sessionStorage.getItem('just_connected_wallet') === 'true';
-  
-  // Check if more than 24 hours have passed since last popup
-  const shouldAllowNewPopup = () => {
-    // If it's a login event, always allow
-    if (isLoginEvent) {
-      
-      return true;
-    }
-    
-    const lastTimestampStr = localStorage.getItem('streak_popup_last_timestamp');
-    if (lastTimestampStr) {
-      const lastTimestamp = parseInt(lastTimestampStr, 10);
-      const hoursSinceLastPopup = (Date.now() - lastTimestamp) / (1000 * 60 * 60);
-      
-      // If it's been over 24 hours, allow a new popup regardless of other flags
-      if (hoursSinceLastPopup >= 24) {
-        
-        return true;
-      }
-    } else {
-      // No timestamp recorded, this is first time, allow popup
-      return true;
-    }
-    
-    // Otherwise, check session flags
-    return !(hasShownStreakModalThisSession || window.hasShownStreakModalThisSession === true);
-  };
-  
-  // Check if we should skip based on shorter time periods (same day/session)
-  const shouldSkipStreak = () => {
-    // If we're forcing a new popup due to login or 24+ hours, don't skip
-    if (shouldAllowNewPopup()) {
-      return false;
-    }
-    
-    // Check session storage
-    const shownThisSession = sessionStorage.getItem('streak_popup_session') === 'true';
-    
-    // Check if shown today already using ISO date string
-    const today = new Date().toISOString().split('T')[0];
-    const lastShownDay = localStorage.getItem('last_streak_popup_day');
-    if (lastShownDay === today && !isLoginEvent) {
-      
-      return true;
-    }
-    
-    // Check if shown in last 6 hours via localStorage
-    const lastTimestampStr = localStorage.getItem('streak_popup_last_timestamp');
-    if (lastTimestampStr && !isLoginEvent) {
-      const lastTimestamp = parseInt(lastTimestampStr, 10);
-      const sixHoursMs = 6 * 60 * 60 * 1000;
-      if (Date.now() - lastTimestamp < sixHoursMs) {
-        
-        return true;
-      }
-    }
-    
-    return shownThisSession && !isLoginEvent;
-  };
-  
-  if (shouldSkipStreak()) {
-    
-    return;
-  }
-  
-  
-  
-  // Mark as shown - set ALL flags for maximum redundancy
-  hasShownStreakModalThisSession = true;
-  window.hasShownStreakModalThisSession = true;
-  sessionStorage.setItem('streak_popup_session', 'true');
-  localStorage.setItem('streak_popup_last_timestamp', Date.now().toString());
-  const today = new Date().toISOString().split('T')[0];
-  localStorage.setItem('last_streak_popup_day', today);
-  
-  // Remove login flag after successfully showing
-  sessionStorage.removeItem('just_connected_wallet');
-  
-  // Actually show the modal
-  if (globalShowStreakModal) {
-    globalShowStreakModal(details);
-  } else {
-    
-  }
-};
-
-const DailyStreakModal = () => {
+// The component itself
+const DailyStreakModal: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [streakDetails, setStreakDetails] = useState<StreakDetails>({
     streak: 0,
@@ -174,6 +86,14 @@ const DailyStreakModal = () => {
       setStreakDetails(details);
       setOpen(true);
     };
+    
+    // Expose the function globally for direct access
+    if (typeof window !== 'undefined') {
+      window.showStreakModal = (details: StreakDetails) => {
+        setStreakDetails(details);
+        setOpen(true);
+      };
+    }
 
     // Listen for the dailyStreakChecked event
     const handleStreakChecked = (event: CustomEvent) => {
@@ -200,12 +120,15 @@ const DailyStreakModal = () => {
         sessionStorage.setItem('streak_popup_session', 'true');
         localStorage.setItem('streak_popup_last_timestamp', Date.now().toString());
         
-        showDailyStreakModal({
-          streak: data.currentStreak,
-          xpEarned: data.xpAwarded,
-          isMilestone: data.isMilestone || false,
-          leveledUp: data.leveledUp || false,
-          newLevel: data.newLevel
+        // Call imported function from external file
+        import('@/utils/streakUtils').then(({ showDailyStreakModal }) => {
+          showDailyStreakModal({
+            streak: data.currentStreak,
+            xpEarned: data.xpAwarded,
+            isMilestone: data.isMilestone || false,
+            leveledUp: data.leveledUp || false,
+            newLevel: data.newLevel
+          });
         });
       } else {
         
@@ -216,6 +139,9 @@ const DailyStreakModal = () => {
 
     return () => {
       globalShowStreakModal = null;
+      if (typeof window !== 'undefined') {
+        window.showStreakModal = undefined;
+      }
       document.removeEventListener('dailyStreakChecked', handleStreakChecked as EventListener);
     };
   }, []);

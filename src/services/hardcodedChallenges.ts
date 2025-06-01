@@ -198,6 +198,9 @@ export const testConceptReviewChallenge: any = {
   practicalExample: "When a user transfers an NFT they own to another address, the transaction can finalize immediately. But when interacting with a shared marketplace contract used by multiple users, the transaction goes through full consensus to prevent conflicts."
 };
 
+// Fallback challenges - only used when dynamic generation fails
+// These are production-ready challenges used as a backup mechanism
+
 // Generate fallback challenges of different types and difficulties
 export const getFallbackChallenges = (): DailyChallenge[] => {
   const today = new Date();
