@@ -1799,16 +1799,14 @@ const ModulePage: React.FC = () => {
                 size="sm"
                 className="ml-2 text-xs"
                 onClick={() => {
-                  // Set test streak details
-                  setStreakDetails({
-                    streak: 7, // Test with milestone
-                    xpEarned: 125, // Combined regular + milestone reward
-                    isMilestone: true
-                  });
-                  // Use the new streakUtils function instead of the state
+                  // Set test streak details with proper XP reward values
+                  // For a milestone (7 days), we use 25 (regular) + 100 (milestone) = 125 XP
+                  const milestoneXp = 125;
+                  
+                  // Use the streakUtils function to show the modal
                   streakUtils.showDailyStreakModal({
                     streak: 7,
-                    xpEarned: 125,
+                    xpEarned: milestoneXp, // Proper XP for 7-day milestone
                     isMilestone: true
                   });
                 }}

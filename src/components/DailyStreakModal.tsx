@@ -6,6 +6,12 @@ import { CalendarCheck, Flame, Award, Star } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '@/contexts/AuthContext';
 
+// XP rewards constants matching learningService.ts
+const XP_REWARDS = {
+  DAILY_STREAK: 25,
+  STREAK_MILESTONE: 100
+};
+
 // Add type declaration for the window object
 declare global {
   interface Window {
@@ -171,6 +177,22 @@ const DailyStreakModal: React.FC = () => {
     }
   }, [open, streakDetails]);
 
+  // Calculate the actual XP reward to display
+  const getDisplayXp = () => {
+    // If XP value is already provided and > 0, use it
+    if (streakDetails.xpEarned > 0) {
+      return streakDetails.xpEarned;
+    }
+    
+    // Otherwise calculate based on streak milestone
+    if (streakDetails.isMilestone) {
+      return XP_REWARDS.DAILY_STREAK + XP_REWARDS.STREAK_MILESTONE;
+    }
+    
+    // Default daily streak reward
+    return XP_REWARDS.DAILY_STREAK;
+  };
+
   const getMilestoneText = (streak: number) => {
     if (streak === 7) return "One Week Streak!";
     if (streak === 30) return "One Month Streak!";
@@ -254,7 +276,7 @@ const DailyStreakModal: React.FC = () => {
             >
               <div className="flex items-center justify-center">
                 <CalendarCheck className="h-5 w-5 text-yellow-500 mr-2" />
-                <span className="text-yellow-500 font-medium">+{streakDetails.xpEarned} XP Earned!</span>
+                <span className="text-yellow-500 font-medium">+{getDisplayXp()} XP Earned!</span>
               </div>
             </motion.div>
 

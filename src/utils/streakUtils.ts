@@ -1,5 +1,11 @@
 import type { StreakDetails } from '@/components/DailyStreakModal';
 
+// XP rewards constants matching learningService.ts
+const XP_REWARDS = {
+  DAILY_STREAK: 25,
+  STREAK_MILESTONE: 100
+};
+
 // Track if we've shown the streak modal in this browser session
 let hasShownStreakModalThisSession = false;
 
@@ -90,7 +96,17 @@ export const showDailyStreakModal = (details: StreakDetails) => {
   
   // Use the global window method to show the modal if it exists
   if (typeof window !== 'undefined' && (window as any).showStreakModal) {
-    (window as any).showStreakModal(details);
+    // Ensure streak details has non-zero XP value
+    const updatedDetails = {
+      ...details,
+      xpEarned: details.xpEarned > 0 ? details.xpEarned : (
+        details.isMilestone ? 
+          XP_REWARDS.DAILY_STREAK + XP_REWARDS.STREAK_MILESTONE : 
+          XP_REWARDS.DAILY_STREAK
+      )
+    };
+    
+    (window as any).showStreakModal(updatedDetails);
   } else {
     console.warn('[streakUtils] Cannot show streak modal: window.showStreakModal not found');
   }
