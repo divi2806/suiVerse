@@ -12,6 +12,7 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase-config';
+import logger from '@/utils/logger';
 
 // Smart contract details
 const PACKAGE_ID = '0x3113324e84c22ce4925d642f2c2ead709a8a8aaf0928cd23873ddec6f31a1440';
@@ -29,6 +30,8 @@ function getFullnodeUrl(network: string): string {
       return 'https://fullnode.testnet.sui.io:443';
     case 'devnet':
       return 'https://fullnode.devnet.sui.io:443';
+    case 'localnet':
+      return 'http://127.0.0.1:9000';
     default:
       return 'https://fullnode.testnet.sui.io:443';
   }
@@ -62,21 +65,30 @@ const MODULE_DATA = [
  */
 export const createNFTMintingTransaction = (
   recipientAddress: string,
-  moduleId: number
+  moduleId: number | string
 ): TransactionBlock => {
-  console.log(`[NFT] Creating transaction block for module ${moduleId}, recipient: ${recipientAddress}`);
+  logger.log(`[NFT] Creating transaction block for module ${moduleId}, recipient: ${recipientAddress}`);
+  
+  // Convert moduleId to a number if it's a string
+  const moduleIdNumber = typeof moduleId === 'string' ? 
+    parseInt(moduleId.replace(/[^0-9]/g, '')) || 1 : moduleId;
+  
+  // Ensure moduleId is within valid range (1-16)
+  const safeModuleId = Math.max(1, Math.min(16, moduleIdNumber));
+  
+  logger.log(`[NFT] Converted moduleId: ${moduleId} -> ${safeModuleId}`);
   
   // Get module data
-  const moduleData = MODULE_DATA.find(m => m.id === moduleId) || {
-    name: `Module ${moduleId}`,
-    description: `Completed module ${moduleId}`
+  const moduleData = MODULE_DATA.find(m => m.id === safeModuleId) || {
+    name: `Module ${safeModuleId}`,
+    description: `Completed module ${safeModuleId}`
   };
 
   // Generate image URL using DiceBear
-  const imageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${moduleId}`;
+  const imageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${safeModuleId}`;
   
-  console.log(`[NFT] Module data: ${moduleData.name}, image URL: ${imageUrl}`);
-  console.log(`[NFT] Using contract: ${PACKAGE_ID}`);
+  logger.log(`[NFT] Module data: ${moduleData.name}, image URL: ${imageUrl}`);
+  logger.log(`[NFT] Using contract: ${PACKAGE_ID}`);
   
   // Create a new transaction block
   const tx = new TransactionBlock();
@@ -86,14 +98,14 @@ export const createNFTMintingTransaction = (
     target: `${PACKAGE_ID}::academy_nfts::mint_achievement_nft_open`,
     arguments: [
       tx.pure(recipientAddress),
-      tx.pure(moduleId),
+      tx.pure(safeModuleId), // Use the safe numeric moduleId
       tx.pure(moduleData.name),
       tx.pure(moduleData.description),
       tx.pure(imageUrl)
     ]
   });
 
-  console.log(`[NFT] Transaction block created successfully`);
+  logger.log(`[NFT] Transaction block created successfully`);
   return tx;
 };
 
@@ -101,27 +113,34 @@ export const createNFTMintingTransaction = (
  * Mint an achievement NFT for module completion
  * This will create a transaction and return it for the user's wallet to sign
  * @param recipientAddress The wallet address of the user receiving the NFT
- * @param moduleId The module ID (1-16)
+ * @param moduleId The module ID (1-16) or module name string
  * @returns Object with transaction status or transaction for wallet to sign
  */
 export const mintModuleCompletionNFT = async (
   recipientAddress: string,
-  moduleId: number
+  moduleId: number | string
 ): Promise<{ success: boolean; txDigest?: string; message?: string; nftId?: string; transaction?: TransactionBlock }> => {
   try {
-    console.log(`[NFT] Starting mintModuleCompletionNFT for address: ${recipientAddress}, module: ${moduleId}`);
+    logger.log(`[NFT] Starting mintModuleCompletionNFT for address: ${recipientAddress}, module: ${moduleId}`);
     
     // Improved address validation
     if (!recipientAddress || typeof recipientAddress !== 'string') {
-      console.error('[NFT] Invalid recipient address format');
+      logger.error('[NFT] Invalid recipient address format');
       return { 
         success: false, 
         message: 'Invalid recipient address format' 
       };
     }
     
-    if (moduleId < 1 || moduleId > 16) {
-      console.error(`[NFT] Invalid moduleId: ${moduleId}`);
+    // Convert moduleId to a number if it's a string
+    const moduleIdNumber = typeof moduleId === 'string' ? 
+      parseInt(moduleId.replace(/[^0-9]/g, '')) || 1 : moduleId;
+    
+    // Ensure moduleId is within valid range (1-16)
+    const safeModuleId = Math.max(1, Math.min(16, moduleIdNumber));
+    
+    if (safeModuleId < 1 || safeModuleId > 16) {
+      logger.error(`[NFT] Invalid moduleId: ${moduleId} (converted to ${safeModuleId})`);
       return { 
         success: false, 
         message: 'Invalid module ID. Must be between 1 and 16.' 
@@ -129,19 +148,19 @@ export const mintModuleCompletionNFT = async (
     }
 
     // Check if user already has this NFT
-    const hasNFT = await hasModuleNFT(recipientAddress, moduleId);
-    console.log(`[NFT] User already has NFT for module ${moduleId}: ${hasNFT}`);
+    const hasNFT = await hasModuleNFT(recipientAddress, safeModuleId);
+    logger.log(`[NFT] User already has NFT for module ${safeModuleId}: ${hasNFT}`);
     
     if (hasNFT) {
       return {
         success: false,
-        message: `You already own the NFT for Module ${moduleId}. Check your inventory.`
+        message: `You already own the NFT for Module ${safeModuleId}. Check your inventory.`
       };
     }
     
     // Create the transaction for the wallet to sign
-    console.log(`[NFT] Creating transaction for module ${moduleId}`);
-    const transaction = createNFTMintingTransaction(recipientAddress, moduleId);
+    logger.log(`[NFT] Creating transaction for module ${safeModuleId}`);
+    const transaction = createNFTMintingTransaction(recipientAddress, safeModuleId);
     
     // For backend integration, simply return the transaction for the frontend to sign with user's wallet
     return {
@@ -151,12 +170,13 @@ export const mintModuleCompletionNFT = async (
     };
     
   } catch (error) {
-    console.error('[NFT] Error creating NFT minting transaction:', error);
+    logger.error('[NFT] Error creating NFT minting transaction:', error);
     
     // Create a fallback transaction as a last resort
     try {
-      console.log(`[NFT] Attempting fallback transaction creation`);
-      const transaction = createNFTMintingTransaction(recipientAddress, moduleId);
+      logger.log(`[NFT] Attempting fallback transaction creation`);
+      const safeModuleId = typeof moduleId === 'string' ? 1 : Math.max(1, Math.min(16, moduleId));
+      const transaction = createNFTMintingTransaction(recipientAddress, safeModuleId);
       
       return {
         success: true,
@@ -164,7 +184,7 @@ export const mintModuleCompletionNFT = async (
         transaction
       };
     } catch (fallbackError) {
-      console.error('[NFT] Fallback transaction creation failed:', fallbackError);
+      logger.error('[NFT] Fallback transaction creation failed:', fallbackError);
       return { 
         success: false, 
         message: error instanceof Error ? error.message : 'Unknown error creating NFT minting transaction' 
@@ -182,23 +202,30 @@ export const mintModuleCompletionNFT = async (
  */
 export const recordSuccessfulMint = async (
   walletAddress: string,
-  moduleId: number,
+  moduleId: number | string,
   txDigest: string,
   nftId?: string
 ) => {
   try {
-    const moduleData = MODULE_DATA.find(m => m.id === moduleId) || {
-      name: `Module ${moduleId}`,
-      description: `Completed module ${moduleId}`
+    // Convert moduleId to a number if it's a string
+    const moduleIdNumber = typeof moduleId === 'string' ? 
+      parseInt(moduleId.replace(/[^0-9]/g, '')) || 1 : moduleId;
+    
+    // Ensure moduleId is within valid range (1-16)
+    const safeModuleId = Math.max(1, Math.min(16, moduleIdNumber));
+    
+    const moduleData = MODULE_DATA.find(m => m.id === safeModuleId) || {
+      name: `Module ${safeModuleId}`,
+      description: `Completed module ${safeModuleId}`
     };
     
-    const imageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${moduleId}`;
+    const imageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${safeModuleId}`;
     
     // Create NFT data object without the nftId field initially
     const nftData = {
       userId: walletAddress,
       walletAddress: walletAddress,
-      moduleId: moduleId,
+      moduleId: safeModuleId,
       moduleName: moduleData.name,
       description: moduleData.description,
       imageUrl: imageUrl,
@@ -214,10 +241,9 @@ export const recordSuccessfulMint = async (
     
     await addDoc(collection(db, 'user_nfts'), nftData);
     
-    
     return true;
   } catch (error) {
-    
+    logger.error('[NFT] Error recording successful mint:', error);
     return false;
   }
 };
@@ -226,36 +252,39 @@ export const recordSuccessfulMint = async (
  * Check if user already has an NFT for a specific module
  * @param walletAddress User's wallet address
  * @param moduleId Module ID to check
- * @returns Boolean indicating if user has the NFT
+ * @returns Boolean indicating if the user already has the NFT
  */
-export const hasModuleNFT = async (walletAddress: string, moduleId: number): Promise<boolean> => {
+export const hasModuleNFT = async (walletAddress: string, moduleId: number | string): Promise<boolean> => {
   try {
-    console.log(`[NFT] Checking if user ${walletAddress} has NFT for module ${moduleId}`);
+    logger.log(`[NFT] Checking if user ${walletAddress} has NFT for module ${moduleId}`);
     
-    // Query Firestore for existing NFT records
-    const nftsSnapshot = await getDocs(
-      query(
-        collection(db, 'user_nfts'),
-        where('walletAddress', '==', walletAddress),
-        where('moduleId', '==', moduleId)
-      )
+    // Convert moduleId to a number if it's a string
+    const moduleIdNumber = typeof moduleId === 'string' ? 
+      parseInt(moduleId.replace(/[^0-9]/g, '')) || 1 : moduleId;
+    
+    // Ensure moduleId is within valid range (1-16)
+    const safeModuleId = Math.max(1, Math.min(16, moduleIdNumber));
+    
+    // First, check in Firestore for faster response
+    const nftsRef = collection(db, 'user_nfts');
+    const q = query(
+      nftsRef, 
+      where('walletAddress', '==', walletAddress),
+      where('moduleId', '==', safeModuleId)
     );
     
-    const hasNFTInFirestore = !nftsSnapshot.empty;
+    const querySnapshot = await getDocs(q);
     
-    if (hasNFTInFirestore) {
-      console.log(`[NFT] Found existing NFT in Firestore for module ${moduleId}`);
+    if (!querySnapshot.empty) {
+      logger.log(`[NFT] Found existing NFT in Firestore for module ${safeModuleId}`);
       return true;
     }
     
-    // Additional check if needed for on-chain verification
-    // This would be a more complex implementation involving querying the blockchain
-    
+    // If not found in Firestore, return false
     return false;
   } catch (error) {
-    console.error(`[NFT] Error checking if user has NFT:`, error);
-    // Default to false to allow minting - better user experience than blocking incorrectly
-    return false;
+    logger.error(`[NFT] Error checking if user has NFT:`, error);
+    return false; // Default to false on error to allow the user to try minting
   }
 };
 
@@ -266,19 +295,21 @@ export const hasModuleNFT = async (walletAddress: string, moduleId: number): Pro
  */
 export const getUserNFTs = async (walletAddress: string) => {
   try {
-    const nftsSnapshot = await getDocs(
-      query(
-        collection(db, 'user_nfts'),
-        where('walletAddress', '==', walletAddress)
-      )
-    );
+    // Query user_nfts collection for the user's NFTs
+    const nftsRef = collection(db, 'user_nfts');
+    const q = query(nftsRef, where('walletAddress', '==', walletAddress));
+    const querySnapshot = await getDocs(q);
     
-    return nftsSnapshot.docs.map(doc => ({
+    const nfts = querySnapshot.docs.map(doc => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
+      // Convert Firestore timestamp to JS Date
+      timestamp: doc.data().timestamp?.toDate() || new Date(),
     }));
-  } catch (error) {
     
+    return nfts;
+  } catch (error) {
+    logger.error('[NFT] Error getting user NFTs:', error);
     return [];
   }
 };

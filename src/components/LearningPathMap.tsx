@@ -280,23 +280,12 @@ const LearningPathMap: React.FC<LearningPathMapProps> = ({
   
   // Render modules for all galaxies
   const renderModules = () => {
-    // Check for completed galaxies and ensure next ones are unlocked
-    for (let i = 0; i < galaxies.length - 1; i++) {
-      const currentGalaxy = galaxies[i];
-      const nextGalaxy = galaxies[i + 1];
-      
-      if (currentGalaxy && nextGalaxy && currentGalaxy.completed && !nextGalaxy.unlocked) {
-        console.log(`[LearningPathMap] Galaxy ${currentGalaxy.id} completed but Galaxy ${nextGalaxy.id} still locked - forcing unlock`);
-        // This is a failsafe - the next galaxy should be unlocked if previous is completed
-        nextGalaxy.unlocked = true;
-        if (nextGalaxy.modules.length > 0) {
-          nextGalaxy.modules[0].locked = false;
-        }
-      }
-    }
+    // We're removing the automatic galaxy unlocking code here
+    // A galaxy should only be unlocked when ALL modules of the previous galaxy are completed
+    // This will be handled by the Learning component and learningService
     
     return galaxies.map(galaxy => {
-      return galaxy.modules.map(module => {
+      return galaxy.modules.map((module, moduleIndex) => {
         const isCurrent = module.id === currentModuleId;
         const moduleX = galaxy.position.x + module.position.x;
         const moduleY = galaxy.position.y + module.position.y;
@@ -318,10 +307,29 @@ const LearningPathMap: React.FC<LearningPathMapProps> = ({
         const isMoveLanguageModule = module.id === 'move-language';
         const forceClickable = isGenesisCompleted && isMoveLanguageModule;
         
-        // Only allow clicking if the module's galaxy is unlocked and the module is either completed or not locked
-        // If a module is completed, we should always allow clicking it regardless of locked status
+        // Check if the previous module in the same galaxy is completed
+        let previousModuleCompleted = false;
+        if (moduleIndex === 0) {
+          // First module in galaxy - always clickable if galaxy is unlocked
+          previousModuleCompleted = true;
+        } else if (moduleIndex > 0) {
+          // Check if the previous module in this galaxy is completed
+          previousModuleCompleted = galaxy.modules[moduleIndex - 1].completed;
+        }
+        
+        // Only allow clicking if:
+        // 1. The module's galaxy is unlocked AND
+        // 2a. The module is completed OR
+        // 2b. The module is not locked OR
+        // 2c. The previous module in the same galaxy is completed
         // Also allow clicking if we're forcing it clickable (special case for move-language)
-        const isClickable = (galaxy.unlocked && (module.completed || !module.locked)) || forceClickable;
+        const isClickable = (
+          galaxy.unlocked && (
+            module.completed || 
+            !module.locked || 
+            previousModuleCompleted
+          )
+        ) || forceClickable;
         
         return (
           <div

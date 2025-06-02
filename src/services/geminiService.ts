@@ -1,6 +1,14 @@
-import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { 
+  GoogleGenerativeAI, 
+  GenerativeModel,
+  GenerateContentResult,
+  HarmCategory,
+  HarmBlockThreshold
+} from '@google/generative-ai';
+import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase-config';
+// Import the logger
+import logger from '@/utils/logger';
 
 // Function to select the best available API key
 const selectApiKey = (): string => {
@@ -198,6 +206,363 @@ export interface CodingChallenge {
   hints: string[];
 }
 
+// Constants for retry mechanism
+const MAX_RETRIES = 5;
+const INITIAL_RETRY_DELAY = 8000; // 8 seconds
+const MAX_RETRY_DELAY = 16000; // 16 seconds
+const BACKOFF_FACTOR = 2;
+
+/**
+ * Make a model request with retry logic and exponential backoff
+ * @param model The generative model to use
+ * @param prompt The prompt to send to the model
+ * @param retryCount Current retry count (internal use)
+ * @param delay Current delay in ms (internal use)
+ * @returns The model response
+ */
+async function makeModelRequestWithRetry(
+  model: GenerativeModel,
+  prompt: string,
+  retryCount = 0,
+  delay = INITIAL_RETRY_DELAY
+): Promise<GenerateContentResult> {
+  try {
+    logger.log(`[GeminiService] Making model request (attempt ${retryCount + 1})`);
+    
+    // Enhanced prompt with stronger instructions for JSON responses
+    let enhancedPrompt = prompt;
+    const isJsonPrompt = prompt.includes('JSON') || prompt.includes('json');
+    
+    if (isJsonPrompt) {
+      // Add additional instructions to ensure valid JSON
+      enhancedPrompt = `${prompt}\n\nCRITICAL INSTRUCTIONS FOR JSON RESPONSE:\n` +
+        `1. Your response MUST be valid JSON that can be parsed directly with JSON.parse().\n` +
+        `2. DO NOT include markdown code blocks, backticks, or any other formatting.\n` +
+        `3. Return ONLY the raw JSON data, properly formatted and escaped.\n` +
+        `4. Ensure all strings are properly terminated with double quotes.\n` +
+        `5. Verify that all objects and arrays have matching closing brackets.\n` +
+        `6. DO NOT include any text outside the JSON structure.\n` +
+        `7. If you need to include a quote inside a string, escape it with a backslash (\\").`;
+      
+      logger.log('[GeminiService] Enhanced prompt with JSON-specific instructions');
+    }
+    
+    // Make the request with a timeout
+    const result = await Promise.race([
+      model.generateContent(enhancedPrompt),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), 60000) // 60 second timeout
+      )
+    ]) as GenerateContentResult;
+    
+    // Get the response text
+    const responseText = result.response.text();
+    
+    // For JSON responses, validate that we can parse them
+    if (isJsonPrompt) {
+      try {
+        // Try to validate/extract JSON from the response
+        const jsonContent = extractJsonFromText(responseText);
+        
+        // If we got this far, JSON was successfully parsed
+        logger.log('[GeminiService] Successfully parsed JSON from response');
+        
+        // If there are specific format requirements (array or object), check them
+        if (prompt.includes('array') && !Array.isArray(jsonContent)) {
+          logger.warn('[GeminiService] Expected JSON array but got different format, retrying');
+          console.warn('[GeminiService] Expected JSON array but got different format, retrying');
+          throw new Error('Invalid JSON format: expected array');
+        }
+        
+        // Check minimum array length if this is likely a questions/flashcards response
+        if (Array.isArray(jsonContent) && 
+            (prompt.includes('questions') || prompt.includes('flashcards')) && 
+            jsonContent.length < 3) {
+          console.warn(`[GeminiService] JSON array too short (${jsonContent.length} items), retrying`);
+          throw new Error('Invalid JSON format: array too short');
+        }
+      } catch (jsonError) {
+        if (retryCount < MAX_RETRIES) {
+          console.warn(`[GeminiService] JSON validation failed: ${jsonError.message}, retrying...`);
+          
+          // Calculate the next delay with exponential backoff
+          const nextDelay = retryCount === 0 
+            ? INITIAL_RETRY_DELAY  // First retry uses 8 seconds
+            : MAX_RETRY_DELAY;     // All subsequent retries use 16 seconds
+          
+          // Wait for the delay
+          await new Promise(resolve => setTimeout(resolve, nextDelay));
+          
+          // Retry the request with incremented retry count and updated delay
+          return makeModelRequestWithRetry(model, prompt, retryCount + 1, nextDelay);
+        } else {
+          console.error(`[GeminiService] Maximum retry count (${MAX_RETRIES}) reached. Using fallback content.`);
+          // Let the error bubble up - fallback mechanisms will handle it at a higher level
+          throw jsonError;
+        }
+      }
+    }
+    
+    return result;
+  } catch (error: any) {
+    // Check if we've reached the maximum retry count
+    if (retryCount >= MAX_RETRIES) {
+      console.error(`[GeminiService] Maximum retry count (${MAX_RETRIES}) reached. Giving up.`);
+      throw error;
+    }
+    
+    // Calculate the next delay with exponential backoff
+    const nextDelay = retryCount === 0 
+      ? INITIAL_RETRY_DELAY  // First retry uses 8 seconds
+      : MAX_RETRY_DELAY;     // All subsequent retries use 16 seconds
+    
+    // Log the error and retry information
+    console.warn(`[GeminiService] Error: ${error.message}. Retrying in ${nextDelay / 1000} seconds...`);
+    
+    // Wait for the delay
+    await new Promise(resolve => setTimeout(resolve, nextDelay));
+    
+    // Retry the request with incremented retry count and updated delay
+    return makeModelRequestWithRetry(model, prompt, retryCount + 1, nextDelay);
+  }
+}
+
+/**
+ * Helper function to extract JSON from a string that might contain markdown code blocks
+ * @param text The text that might contain JSON in markdown code blocks
+ * @returns Parsed JSON object
+ */
+function extractJsonFromText(text: string): any {
+  logger.log('[GeminiService] Attempting to extract JSON from response');
+  
+  try {
+    // First try direct JSON parsing
+    return JSON.parse(text);
+  } catch (e) {
+    logger.log('[GeminiService] Direct JSON parsing failed, trying alternative methods');
+    
+    // Try multiple extraction and repair methods
+    const extractionMethods = [
+      // Method 1: Extract JSON from markdown code blocks
+      () => {
+        const jsonRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/;
+        const match = text.match(jsonRegex);
+        
+        if (match && match[1]) {
+          const extractedJson = match[1].trim();
+          logger.log('[GeminiService] Extracted JSON from markdown code block');
+          return JSON.parse(extractedJson);
+        }
+        throw new Error('No JSON found in code block');
+      },
+      
+      // Method 2: Find array/object directly
+      () => {
+        const possibleJson = text.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+        if (possibleJson && possibleJson[1]) {
+          const extractedJson = possibleJson[1].trim();
+          logger.log('[GeminiService] Extracted JSON from text');
+          return JSON.parse(extractedJson);
+        }
+        throw new Error('No JSON object/array found in text');
+      },
+      
+      // Method 3: Clean markdown formatting and try to parse
+      () => {
+        let cleanedText = text
+          .replace(/```[a-z]*\n?/g, '')  // Remove code block markers
+          .replace(/\n?```/g, '')        // Remove closing code block markers
+          .replace(/^\s*\n/gm, '')       // Remove empty lines
+          .trim();
+        
+        // Check if it's an array or object
+        if ((cleanedText.startsWith('[') && cleanedText.endsWith(']')) || 
+            (cleanedText.startsWith('{') && cleanedText.endsWith('}'))) {
+          logger.log('[GeminiService] Parsed cleaned JSON');
+          return JSON.parse(cleanedText);
+        }
+        throw new Error('Cleaned text is not valid JSON');
+      },
+      
+      // Method 4: Attempt to repair common JSON issues - unterminated strings, missing quotes, etc.
+      () => {
+        logger.log('[GeminiService] Attempting to repair malformed JSON');
+        const repaired = repairMalformedJson(text);
+        return JSON.parse(repaired);
+      },
+      
+      // Method 5: Last resort - create synthetic JSON from text patterns
+      () => {
+        logger.log('[GeminiService] Creating synthetic JSON from text patterns');
+        return createSyntheticJsonFromText(text);
+      }
+    ];
+    
+    // Try each method in sequence
+    for (const method of extractionMethods) {
+      try {
+        return method();
+      } catch (methodError) {
+        // Continue to next method
+        logger.log(`[GeminiService] Extraction method failed: ${methodError.message}`);
+      }
+    }
+    
+    // If all methods fail, throw a clear error
+    throw new Error('Failed to extract valid JSON using all available methods');
+  }
+}
+
+/**
+ * Attempts to repair common issues in malformed JSON
+ * @param text The potentially malformed JSON text
+ * @returns Repaired JSON string
+ */
+function repairMalformedJson(text: string): string {
+  // Start with the most likely JSON content
+  let jsonText = text;
+  
+  // Extract what looks most like JSON (between [ ] or { })
+  const arrayMatch = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+  const objectMatch = text.match(/\{[\s\S]*\}/);
+  
+  if (arrayMatch) {
+    jsonText = arrayMatch[0];
+  } else if (objectMatch) {
+    jsonText = objectMatch[0];
+  }
+  
+  // Fix unterminated strings (common issue)
+  // Look for quotes without matching end quotes
+  let fixedJson = '';
+  let inString = false;
+  let escapeNext = false;
+  let lastQuotePos = -1;
+  
+  for (let i = 0; i < jsonText.length; i++) {
+    const char = jsonText[i];
+    
+    // Handle string boundaries
+    if (char === '"' && !escapeNext) {
+      if (inString) {
+        inString = false;
+      } else {
+        inString = true;
+        lastQuotePos = i;
+      }
+    }
+    
+    // Handle escape sequences
+    if (char === '\\' && !escapeNext) {
+      escapeNext = true;
+    } else {
+      escapeNext = false;
+    }
+    
+    fixedJson += char;
+    
+    // Check for unterminated string at end of line
+    if (inString && (char === '\n' || i === jsonText.length - 1)) {
+      fixedJson += '"'; // Close the string
+      inString = false;
+    }
+  }
+  
+  // Ensure proper array/object termination
+  if (fixedJson.trim().startsWith('[') && !fixedJson.trim().endsWith(']')) {
+    fixedJson = fixedJson.trim() + ']';
+  } else if (fixedJson.trim().startsWith('{') && !fixedJson.trim().endsWith('}')) {
+    fixedJson = fixedJson.trim() + '}';
+  }
+  
+  return fixedJson;
+}
+
+/**
+ * Create synthetic JSON when all parsing attempts fail
+ * @param text The text to extract patterns from
+ * @returns A JSON object with best-effort extraction
+ */
+function createSyntheticJsonFromText(text: string): any {
+  logger.log('[GeminiService] Creating fallback synthetic JSON');
+  
+  // For arrays of objects (like quiz questions or flashcards)
+  if (text.includes('"question"') || text.includes('"answer"') || 
+      text.includes('"options"') || text.includes('"correctAnswer"')) {
+    
+    // Try to extract quiz questions
+    const questions = [];
+    const questionBlocks = text.split(/(?=\s*"question":|(?:\d+\s*\.\s*)"question":)/g);
+    
+    for (let i = 0; i < questionBlocks.length; i++) {
+      const block = questionBlocks[i];
+      if (!block.includes('question')) continue;
+      
+      try {
+        // Extract question
+        const questionMatch = block.match(/"question"\s*:\s*"([^"]+)"/);
+        const question = questionMatch ? questionMatch[1] : `Question ${i+1}`;
+        
+        // Extract options
+        const options = [];
+        const optionsMatches = block.match(/"options"\s*:\s*\[([\s\S]*?)\]/);
+        if (optionsMatches) {
+          const optionsText = optionsMatches[1];
+          const optionMatches = optionsText.match(/"([^"]+)"/g);
+          if (optionMatches) {
+            optionMatches.forEach(opt => {
+              options.push(opt.replace(/"/g, ''));
+            });
+          }
+        }
+        
+        // Ensure we have 4 options
+        while (options.length < 4) {
+          options.push(`Option ${options.length + 1}`);
+        }
+        
+        // Extract correctAnswer
+        let correctAnswer = 0;
+        const correctAnswerMatch = block.match(/"correctAnswer"\s*:\s*(\d+)/);
+        if (correctAnswerMatch) {
+          correctAnswer = parseInt(correctAnswerMatch[1], 10);
+          if (isNaN(correctAnswer) || correctAnswer < 0 || correctAnswer >= options.length) {
+            correctAnswer = 0;
+          }
+        }
+        
+        // Extract explanation
+        const explanationMatch = block.match(/"explanation"\s*:\s*"([^"]+)"/);
+        const explanation = explanationMatch ? explanationMatch[1] : `Explanation for question ${i+1}`;
+        
+        questions.push({
+          id: `synthetic-question-${i+1}`,
+          question,
+          options,
+          correctAnswer,
+          explanation
+        });
+      } catch (e) {
+        // Skip this block if there's an error
+        logger.log(`[GeminiService] Error extracting question from block ${i+1}`);
+      }
+    }
+    
+    // If we found any questions, return them
+    if (questions.length > 0) {
+      logger.log(`[GeminiService] Created synthetic array with ${questions.length} items`);
+      return questions;
+    }
+  }
+  
+  // Fallback to a basic object
+  return [{ 
+    id: "synthetic-fallback-1",
+    content: "Synthetic content created due to JSON parsing failure",
+    note: "The original content couldn't be parsed correctly"
+  }];
+}
+
 /**
  * Generates a complete learning module with flashcards, quizzes, and coding challenges
  */
@@ -217,68 +582,95 @@ export const generateLearningModule = async (moduleId: string): Promise<ModuleCo
     // Get the module number within the galaxy (1 or 2)
     const moduleNumber = GALAXY_MODULES[galaxy as keyof typeof GALAXY_MODULES]?.indexOf(moduleId) + 1 || 1;
     
-    // Create a clearer, more structured prompt that encourages proper JSON formatting
-    const prompt = `Create an engaging learning module about "${topic}" for a space-themed educational platform about the Sui blockchain.
+    // Special enhanced prompt for the Move Language module
+    let prompt = '';
+    
+    if (moduleId === 'move-language') {
+      prompt = `Create comprehensive learning content about the Move programming language for Sui blockchain.
 
-This is Module ${moduleNumber} in the ${galaxy} Galaxy. ${moduleNumber === 2 ? "This module should build upon knowledge from the first module in this galaxy." : "This is the entry module for this galaxy."}
+This should be a detailed, in-depth module with 15 flashcards that progressively build knowledge:
 
-Return your response as a valid JSON object with these fields:
+1. Start with 7-8 flashcards covering theoretical foundations:
+   - What Move is and its relationship to Sui
+   - Core concepts and design principles
+   - Key features that differentiate it from other languages
+   - Object model and ownership
+   - Resource types and linear logic
+
+2. Then include 7-8 flashcards with practical coding examples:
+   - Basic syntax and structure with code samples
+   - Creating and using resources
+   - Defining structs and implementing functions
+   - Working with objects and ownership transfers
+   - Common patterns and best practices
+   - Error handling and security considerations
+   - Step-by-step examples of simple smart contracts
+
+Each coding example should be properly formatted and explained line by line.
+
+Format the response as a valid JSON object with this structure:
 {
-  "title": "Module Title",
-  "description": "Brief 2-3 sentence description of this module",
+  "title": "Move Programming Language",
+  "description": "A comprehensive introduction to Move programming on Sui",
   "flashcards": [
     {
-      "question": "What is [Concept]?",
-      "answer": "Detailed explanation with proper formatting. Include code examples using markdown code blocks where relevant:
-\`\`\`move
-module example::module_name {
-    // Code example here
-    // Use proper Move syntax
-}
-\`\`\`
-Include bullet points and structured content."
-    }
-    // Include exactly 15 flashcards that progressively build knowledge and cover all important aspects of the topic
-    // Make sure flashcards are comprehensive and informative, covering all key Sui concepts related to the topic
+      "question": "What is Move?",
+      "answer": "Detailed answer with key points..."
+    },
+    // More flashcards following the same format
   ],
-  "quiz": [
-    {
-      "question": "Clear, concise question text",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswerIndex": 0, // Index (0-3) of the correct answer
-      "explanation": "Why this answer is correct and what makes the others wrong"
-    }
-    // Include 10 quiz questions that test understanding of the concepts
-  ],
-  "codingChallenges": [
-    {
-      "scenario": "Brief scenario description that's engaging and relates to the module content",
-      "task": "Specific instructions on what the user needs to implement",
-      "codeSnippet": "// Starting code template with TODO comments indicating where to add code\nmodule example::challenge {\n    use sui::transfer;\n    use sui::object::{Self, UID};\n    // TODO: Add implementation\n}",
-      "solution": "// Complete solution code\nmodule example::challenge {\n    use sui::transfer;\n    use sui::object::{Self, UID};\n    // Full implementation here\n}",
-      "hints": ["Specific hint 1", "More detailed hint 2"]
-    }
-    // Include 3 coding challenges of increasing difficulty
-  ],
-  "summary": "Summary paragraph of key learnings that reinforces main concepts"
+  "summary": "A concise summary of the key points covered in this module"
 }
 
-Make sure the content:
-1. Is accurate and educational
-2. Follows a logical progression of complexity
-3. Includes properly formatted Move code examples
-4. Has practical examples relevant to real-world Sui development
-5. Builds upon previous knowledge appropriately for Module ${moduleNumber}
-6. Provides comprehensive coverage of the topic with 15 detailed flashcards
-7. Includes 10 diverse quiz questions that test different aspects of the topic`;
+Make sure the content is accurate, educational, and follows a logical progression from basic concepts to more advanced topics.`;
+    } else {
+      // Enhanced prompt for all other modules to match move-language quality
+      prompt = `Create comprehensive learning content about "${topic}" for the Sui blockchain platform.
 
+This should be a detailed, in-depth module with 15 flashcards that progressively build knowledge like a professional educational course:
+
+1. Start with 7-8 flashcards covering theoretical foundations:
+   - What ${topic} is and its significance in Sui blockchain development
+   - Core concepts and design principles specific to ${topic}
+   - Key features and characteristics that make ${topic} important
+   - Relationship to other Sui/Move concepts
+   - Fundamental theory and mechanisms behind ${topic}
+   - Real-world use cases and applications
+
+2. Then include 7-8 flashcards with practical coding examples:
+   - Basic syntax and structure with detailed code samples
+   - Step-by-step implementation examples
+   - Creating and using relevant resources/objects
+   - Common patterns and best practices for ${topic}
+   - Error handling and security considerations
+   - Performance optimization techniques
+   - Advanced implementation strategies
+
+Each coding example should be properly formatted and explained line by line with comments. Include specific Sui Move code examples that demonstrate the concepts.
+
+Format the response as a valid JSON object with this structure:
+{
+  "title": "A clear, concise title about ${topic}",
+  "description": "A comprehensive introduction to ${topic} in Sui blockchain development",
+  "flashcards": [
+    {
+      "question": "What is ${topic}?",
+      "answer": "Detailed answer with key points, examples, and when relevant, code samples that demonstrate the concept..."
+    },
+    // More flashcards following progressive learning structure
+  ],
+  "summary": "A detailed summary of the key points covered in this module that reinforces the learning path"
+}
+
+Make sure the content is accurate, educational, highly detailed, and follows a logical progression from basic concepts to more advanced topics. The content should match the depth and quality of university-level course materials.`;
+    }
+
+    // Use gemini-2.0-flash model for fast responses
+    const model = getModel(DEFAULT_MODEL);
     
-    
-    try {
-      const model = getModel(SMART_CONTRACT_MODEL);
+    // Generate content
       const result = await model.generateContent(prompt);
       const text = result.response.text();
-      
       
       // Try multiple approaches to extract valid JSON
       let parsedContent = null;
@@ -328,12 +720,12 @@ Make sure the content:
         
         
         // Create a basic module structure
-        const basicModule = createFallbackModule(moduleId);
+      const basicModule = createFallbackModule(moduleId);
         
         // Try to generate just the quiz questions
         try {
           
-          const quizQuestions = await generateQuizQuestions(topic, 10);
+        const quizQuestions = await generateQuizQuestions(topic, 10);
           
           if (quizQuestions && quizQuestions.length > 0) {
             
@@ -346,74 +738,67 @@ Make sure the content:
         return basicModule;
       }
       
-      // Process the content - ensure all required fields are present
-      const processedContent: ModuleContent = {
-        title: parsedContent.title || `Learn about ${topic}`,
-        description: parsedContent.description || `This module teaches you about ${topic}.`,
-        flashcards: (parsedContent.flashcards || []).map((card: any, index: number) => ({
-          id: `${moduleId}-card-${index}`,
-          question: card.question || `What is an important concept in ${topic}?`,
-          answer: card.answer || `This concept is fundamental to understanding ${topic}.`
-        })),
-        quiz: (parsedContent.quiz || []).map((question: any, index: number) => {
-          // Convert correctAnswerIndex to correctAnswer (if needed)
-          let correctAnswer = question.correctAnswer;
-          if (correctAnswer === undefined && question.correctAnswerIndex !== undefined) {
-            correctAnswer = question.correctAnswerIndex;
-          }
-          
-          return {
-            id: `${moduleId}-quiz-${index}`,
-            question: question.question || `Question about ${topic}?`,
-            options: question.options || ['Option A', 'Option B', 'Option C', 'Option D'],
-            correctAnswer: correctAnswer || 0,
-            explanation: question.explanation || 'This is the correct answer based on the module content.'
-          };
-        }),
-        alienChallenges: (parsedContent.codingChallenges || []).map((challenge: any, index: number) => ({
-          id: `${moduleId}-challenge-${index}`,
-          scenario: challenge.scenario || `Scenario about ${topic}`,
-          task: challenge.task || `Complete this task related to ${topic}`,
-          codeSnippet: challenge.codeSnippet || `// Complete the code\nmodule example::module {\n    // Add your implementation here\n}`,
-          solution: challenge.solution || `// Solution\nmodule example::module {\n    // Solution code here\n}`,
-          hints: challenge.hints || ['Think about the core concepts', 'Check your syntax']
-        })),
-        summary: parsedContent.summary || `This module covered important aspects of ${topic}.`
-      };
-      
-      // Ensure we have exactly 15 flashcards
-      if (processedContent.flashcards.length < 15) {
-        // Add more flashcards if needed
-        const additionalCount = 15 - processedContent.flashcards.length;
-        for (let i = 0; i < additionalCount; i++) {
-          const existingLength = processedContent.flashcards.length;
-          processedContent.flashcards.push({
-            id: `${moduleId}-card-${existingLength + i}`,
-            question: `What is another important aspect of ${topic}?`,
-            answer: `This is another critical concept related to ${topic} that builds on previous knowledge.`
-          });
+    // Process the content - ensure all required fields are present
+    const processedContent: ModuleContent = {
+      title: parsedContent.title || `Learn about ${topic}`,
+      description: parsedContent.description || `This module teaches you about ${topic}.`,
+      flashcards: (parsedContent.flashcards || []).map((card: any, index: number) => ({
+        id: `${moduleId}-card-${index}`,
+        question: card.question || `What is an important concept in ${topic}?`,
+        answer: card.answer || `This concept is fundamental to understanding ${topic}.`
+      })),
+      quiz: (parsedContent.quiz || []).map((question: any, index: number) => {
+        // Convert correctAnswerIndex to correctAnswer (if needed)
+        let correctAnswer = question.correctAnswer;
+        if (correctAnswer === undefined && question.correctAnswerIndex !== undefined) {
+          correctAnswer = question.correctAnswerIndex;
         }
-      } else if (processedContent.flashcards.length > 15) {
-        // Limit to 15 flashcards
-        processedContent.flashcards = processedContent.flashcards.slice(0, 15);
+        
+        return {
+          id: `${moduleId}-quiz-${index}`,
+          question: question.question || `Question about ${topic}?`,
+          options: question.options || ['Option A', 'Option B', 'Option C', 'Option D'],
+          correctAnswer: correctAnswer || 0,
+          explanation: question.explanation || 'This is the correct answer based on the module content.'
+        };
+      }),
+      alienChallenges: (parsedContent.alienChallenges || []).map((challenge: any, index: number) => ({
+        id: `${moduleId}-challenge-${index}`,
+        scenario: challenge.scenario || `Scenario about ${topic}`,
+        task: challenge.task || `Complete this task related to ${topic}`,
+        codeSnippet: challenge.codeSnippet || `// Complete the code\nmodule example::module {\n    // Add your implementation here\n}`,
+        solution: challenge.solution || `// Solution\nmodule example::module {\n    // Solution code here\n}`,
+        hints: challenge.hints || ['Think about the core concepts', 'Check your syntax']
+      })),
+      summary: parsedContent.summary || `This module covered important aspects of ${topic}.`
+    };
+    
+    // Ensure we have exactly 15 flashcards
+    if (processedContent.flashcards.length < 15) {
+      // Add more flashcards if needed
+      const additionalCount = 15 - processedContent.flashcards.length;
+      for (let i = 0; i < additionalCount; i++) {
+        const existingLength = processedContent.flashcards.length;
+        processedContent.flashcards.push({
+          id: `${moduleId}-card-${existingLength + i}`,
+          question: `What is another important aspect of ${topic}?`,
+          answer: `This is another critical concept related to ${topic} that builds on previous knowledge.`
+        });
       }
-      
-      // Ensure we have 10 quiz questions
-      if (processedContent.quiz.length < 10) {
-        const additionalQuizzes = await generateQuizQuestions(topic, 10 - processedContent.quiz.length);
-        processedContent.quiz = [...processedContent.quiz, ...additionalQuizzes];
-      } else if (processedContent.quiz.length > 10) {
-        processedContent.quiz = processedContent.quiz.slice(0, 10);
-      }
-      
-      return processedContent;
-    } catch (error) {
-      
-      
-      // Return a fallback module with some content
-      const fallbackModule = createFallbackModule(moduleId);
-      return fallbackModule;
+    } else if (processedContent.flashcards.length > 15) {
+      // Limit to 15 flashcards
+      processedContent.flashcards = processedContent.flashcards.slice(0, 15);
     }
+    
+    // Ensure we have 10 quiz questions
+    if (processedContent.quiz.length < 10) {
+      const additionalQuizzes = await generateQuizQuestions(topic, 10 - processedContent.quiz.length);
+      processedContent.quiz = [...processedContent.quiz, ...additionalQuizzes];
+    } else if (processedContent.quiz.length > 10) {
+      processedContent.quiz = processedContent.quiz.slice(0, 10);
+    }
+    
+    return processedContent;
   } catch (error) {
     
     // Return a complete fallback module
@@ -425,7 +810,7 @@ Make sure the content:
  * Creates a fallback module if Gemini API fails
  */
 export function createFallbackModule(moduleId: string): ModuleContent {
-  console.warn(`[GeminiService] Creating fallback module content for: ${moduleId}`);
+  logger.warn(`[GeminiService] Creating fallback module content for: ${moduleId}`);
   
   // Define the number of cards and questions - always use these exact numbers
   const FLASHCARD_COUNT = 15;
@@ -454,9 +839,9 @@ export function createFallbackModule(moduleId: string): ModuleContent {
   const flashcards = createFallbackFlashcards(moduleId, FLASHCARD_COUNT);
   
   // Verify we have exactly 15 flashcards
-  console.log(`[GeminiService] Created ${flashcards.length} flashcards for module ${moduleId}`);
+  logger.log(`[GeminiService] Created ${flashcards.length} flashcards for module ${moduleId}`);
   if (flashcards.length !== FLASHCARD_COUNT) {
-    console.warn(`[GeminiService] Flashcard count mismatch: ${flashcards.length}/${FLASHCARD_COUNT}`);
+    logger.warn(`[GeminiService] Flashcard count mismatch: ${flashcards.length}/${FLASHCARD_COUNT}`);
     // Ensure we have exactly 15 flashcards by adding or removing
     while (flashcards.length < FLASHCARD_COUNT) {
       const cardNumber = flashcards.length + 1;
@@ -476,9 +861,9 @@ export function createFallbackModule(moduleId: string): ModuleContent {
   const quizQuestions = createFallbackQuestions(moduleId, QUIZ_QUESTION_COUNT);
   
   // Verify we have exactly 10 quiz questions
-  console.log(`[GeminiService] Created ${quizQuestions.length} quiz questions for module ${moduleId}`);
+  logger.log(`[GeminiService] Created ${quizQuestions.length} quiz questions for module ${moduleId}`);
   if (quizQuestions.length !== QUIZ_QUESTION_COUNT) {
-    console.warn(`[GeminiService] Quiz question count mismatch: ${quizQuestions.length}/${QUIZ_QUESTION_COUNT}`);
+    logger.warn(`[GeminiService] Quiz question count mismatch: ${quizQuestions.length}/${QUIZ_QUESTION_COUNT}`);
     // Ensure we have exactly 10 quiz questions by adding or removing
     while (quizQuestions.length < QUIZ_QUESTION_COUNT) {
       const questionNumber = quizQuestions.length + 1;
@@ -929,7 +1314,7 @@ function createFallbackAlienChallenges(moduleId: string): CodingChallenge[] {
     });
   }
   
-  console.log(`[GeminiService] Created ${challenges.length} alien challenges for module ${moduleId}`);
+  logger.log(`[GeminiService] Created ${challenges.length} alien challenges for module ${moduleId}`);
   
   // Ensure we always return at least one challenge
   return challenges;
@@ -946,7 +1331,7 @@ const moduleCache: Record<string, ModuleContent> = {};
 export const getModule = async (moduleId: string): Promise<ModuleContent> => {
   // First check local memory cache
   if (moduleCache[moduleId]) {
-    console.log(`[Module] Using cached module for ${moduleId}`);
+    logger.log(`[Module] Using cached module for ${moduleId}`);
     return moduleCache[moduleId];
   }
   
@@ -956,7 +1341,7 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
     const moduleDoc = await getDoc(moduleRef);
     
     if (moduleDoc.exists()) {
-      console.log(`[Module] Found module in Firebase for ${moduleId}`);
+      logger.log(`[Module] Found module in Firebase for ${moduleId}`);
       const moduleData = moduleDoc.data() as ModuleContent;
       
       // Check if the module has the correct number of flashcards and quiz questions
@@ -964,25 +1349,25 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
       
       // Ensure we have exactly 15 flashcards
       if (!moduleData.flashcards || moduleData.flashcards.length !== 15) {
-        console.log(`[Module] Module has ${moduleData.flashcards?.length || 0} flashcards, updating to 15`);
+        logger.log(`[Module] Module has ${moduleData.flashcards?.length || 0} flashcards, updating to 15`);
         needsUpdate = true;
       }
       
       // Ensure we have exactly 10 quiz questions
       if (!moduleData.quiz || moduleData.quiz.length !== 10) {
-        console.log(`[Module] Module has ${moduleData.quiz?.length || 0} quiz questions, updating to 10`);
+        logger.log(`[Module] Module has ${moduleData.quiz?.length || 0} quiz questions, updating to 10`);
         needsUpdate = true;
       }
       
       // Ensure we have at least one alien challenge
       if (!moduleData.alienChallenges || moduleData.alienChallenges.length === 0) {
-        console.log(`[Module] Module has no alien challenges, adding them`);
+        logger.log(`[Module] Module has no alien challenges, adding them`);
         needsUpdate = true;
       }
       
       // If the module needs updating, generate a new one
       if (needsUpdate) {
-        console.log(`[Module] Regenerating module for ${moduleId} to meet new requirements`);
+        logger.log(`[Module] Regenerating module for ${moduleId} to meet new requirements`);
         return await regenerateModule(moduleId);
       }
       
@@ -992,7 +1377,7 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
       return moduleData;
     }
     
-    console.log(`[Module] Generating new module for ${moduleId}`);
+    logger.log(`[Module] Generating new module for ${moduleId}`);
     
     // Generate new module content
     const moduleContent = await generateLearningModule(moduleId);
@@ -1002,21 +1387,21 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
     
     // Check flashcards
     if (!moduleContent.flashcards || moduleContent.flashcards.length !== 15) {
-      console.log(`[Module] Generated module has ${moduleContent.flashcards?.length || 0} flashcards, fixing...`);
+      logger.log(`[Module] Generated module has ${moduleContent.flashcards?.length || 0} flashcards, fixing...`);
       moduleContent.flashcards = createFallbackFlashcards(moduleId, 15);
       isValid = false;
     }
     
     // Check quiz questions
     if (!moduleContent.quiz || moduleContent.quiz.length !== 10) {
-      console.log(`[Module] Generated module has ${moduleContent.quiz?.length || 0} quiz questions, fixing...`);
+      logger.log(`[Module] Generated module has ${moduleContent.quiz?.length || 0} quiz questions, fixing...`);
       moduleContent.quiz = createFallbackQuestions(moduleId, 10);
       isValid = false;
     }
     
     // Check alien challenges
     if (!moduleContent.alienChallenges || moduleContent.alienChallenges.length === 0) {
-      console.log(`[Module] Generated module has no alien challenges, adding them...`);
+      logger.log(`[Module] Generated module has no alien challenges, adding them...`);
       moduleContent.alienChallenges = createFallbackAlienChallenges(moduleId);
       isValid = false;
     }
@@ -1029,9 +1414,9 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
         moduleId: moduleId,
         wasRepaired: !isValid
       });
-      console.log(`[Module] Stored module in Firebase for ${moduleId}`);
+      logger.log(`[Module] Stored module in Firebase for ${moduleId}`);
     } catch (dbError) {
-      console.error(`[Module] Failed to store in Firebase: ${dbError}`);
+      logger.error(`[Module] Failed to store in Firebase: ${dbError}`);
     }
     
     // Store in local cache
@@ -1039,7 +1424,7 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
     
     return moduleContent;
   } catch (error) {
-    console.error(`[Module] Error getting module: ${error}`);
+    logger.error(`[Module] Error getting module: ${error}`);
     
     // Get topic for fallback content
     const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
@@ -1060,7 +1445,7 @@ export const getModule = async (moduleId: string): Promise<ModuleContent> => {
         isFailover: true
       });
     } catch (dbError) {
-      console.error(`[Module] Failed to store fallback in Firebase: ${dbError}`);
+      logger.error(`[Module] Failed to store fallback in Firebase: ${dbError}`);
     }
     
     return fallbackContent;
@@ -1085,9 +1470,9 @@ const regenerateModule = async (moduleId: string): Promise<ModuleContent> => {
         updatedAt: serverTimestamp(),
         wasRegenerated: true
       });
-      console.log(`[Module] Updated module in Firebase for ${moduleId}`);
+      logger.log(`[Module] Updated module in Firebase for ${moduleId}`);
     } catch (dbError) {
-      console.error(`[Module] Failed to update in Firebase: ${dbError}`);
+      logger.error(`[Module] Failed to update in Firebase: ${dbError}`);
     }
     
     // Store in local cache
@@ -1095,7 +1480,7 @@ const regenerateModule = async (moduleId: string): Promise<ModuleContent> => {
     
     return moduleContent;
   } catch (error) {
-    console.error(`[Module] Error regenerating module: ${error}`);
+    logger.error(`[Module] Error regenerating module: ${error}`);
     
     // Get topic for fallback content
     const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
@@ -1108,16 +1493,17 @@ const regenerateModule = async (moduleId: string): Promise<ModuleContent> => {
 };
 
 /**
- * Generate content using Gemini API
+ * Generate content with the specified model
  */
 export const generateContent = async (prompt: string, modelName = DEFAULT_MODEL): Promise<string> => {
   try {
     const model = getModel(modelName);
-    const result = await model.generateContent(prompt);
+    // Use the retry mechanism instead of direct call
+    const result = await makeModelRequestWithRetry(model, prompt);
     return result.response.text();
   } catch (error) {
-    
-    return 'I encountered an error generating a response. Please try again later.';
+    logger.error(`[GeminiService] Error generating content:`, error);
+    return "I'm sorry, I couldn't generate a response at the moment. Please try again later.";
   }
 };
 
@@ -1229,33 +1615,43 @@ export const generateQuizQuestions = async (
   try {
     const model = getModel(DEFAULT_MODEL);
     
-    const prompt = `Generate ${count} multiple-choice quiz questions about ${topic}. 
-The questions should be at ${difficulty} difficulty level.
+    const prompt = `Create a set of 10 detailed, in-depth quiz questions about ${topic} for the Sui blockchain platform.
 
-IMPORTANT: Your response must be valid JSON array of question objects.
+These should be high-quality multiple-choice questions that thoroughly test the user's understanding of ${topic} at different cognitive levels (knowledge, comprehension, application, analysis).
 
-Each question must follow this exact JSON format:
-{
-  "question": "The question text here",
-  "options": ["Option A", "Option B", "Option C", "Option D"],
-  "correctAnswer": 0, // Index of the correct answer (0-3)
-  "explanation": "Explanation why this answer is correct"
-}
+Each question should include:
+1. A clear, specific question about ${topic} that tests deep understanding
+2. Four well-crafted possible answers (labeled 1-4)
+3. The index of the correct answer (1-4)
+4. A comprehensive explanation of why the answer is correct and why the other options are incorrect
 
-Ensure that:
-1. Each question has exactly 4 options
-2. The correct answer index is between 0-3
-3. Each question includes a clear explanation
-4. Questions are factually accurate
-5. For ${difficulty} difficulty, the questions should be ${
-      difficulty === 'easy' 
-        ? 'basic and straightforward, suitable for beginners' 
-        : difficulty === 'medium' 
-        ? 'moderately challenging with some nuanced concepts' 
-        : 'advanced and detailed, requiring deep knowledge'
-    }
+Question distribution:
+- 3-4 questions on theoretical concepts and principles of ${topic}
+- 3-4 questions on practical application and implementation details
+- 2-3 questions that involve analyzing code snippets or debugging scenarios
+- At least 1 question on security considerations or best practices
 
-Return ONLY a valid JSON array of question objects without any text before or after.`;
+For code-related questions, include properly formatted Move code examples in both the questions and answers. Make sure code examples are accurate, idiomatic Sui Move code.
+
+IMPORTANT: Return your response as raw JSON without markdown formatting or code blocks. The response must be a valid JSON array that can be parsed directly.
+
+Use this exact format:
+[
+  {
+    "question": "Detailed question text about ${topic}?",
+    "options": [
+      "Option 1 with specific, meaningful content",
+      "Option 2 with specific, meaningful content",
+      "Option 3 with specific, meaningful content",
+      "Option 4 with specific, meaningful content"
+    ],
+    "correctAnswer": 1,
+    "explanation": "Thorough explanation of why Option 1 is correct, including technical details and references to Sui/Move concepts. Also explain why the other options are incorrect."
+  },
+  ...
+]
+
+The questions should progressively build in difficulty, starting with fundamental concepts and advancing to more complex applications. Make sure questions are challenging but fair, and cover important aspects of ${topic} thoroughly and accurately.`;
 
     
     const result = await model.generateContent(prompt);
@@ -1562,7 +1958,919 @@ export function createFallbackFlashcards(moduleId: string, count: number = 15): 
     });
   }
   
-  console.log(`[GeminiService] Created ${flashcards.length} fallback flashcards for: ${moduleId}`);
+  logger.log(`[GeminiService] Created ${flashcards.length} fallback flashcards for: ${moduleId}`);
   
   return flashcards;
-} 
+}
+
+/**
+ * Force complete regeneration of a module with enhanced content
+ */
+export const regenerateEnhancedModule = async (moduleId: string): Promise<boolean> => {
+  try {
+    logger.log(`[GeminiService] Regenerating enhanced module ${moduleId}`);
+    
+    // Generate new module content
+    const moduleContent = await generateLearningModule(moduleId);
+    
+    // Verify the module has all required content
+    let isValid = true;
+    
+    // Check flashcards
+    if (!moduleContent.flashcards || moduleContent.flashcards.length !== 15) {
+      logger.log(`[GeminiService] Generated module has ${moduleContent.flashcards?.length || 0} flashcards, fixing...`);
+      moduleContent.flashcards = createFallbackFlashcards(moduleId, 15);
+      isValid = false;
+    }
+    
+    // Save the module content to Firestore
+    const moduleRef = doc(db, 'generatedModules', moduleId);
+    
+    await setDoc(moduleRef, {
+      ...moduleContent,
+      moduleId,
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp()
+    });
+    
+    logger.log(`[GeminiService] Module content saved to Firestore`);
+    
+    // Now regenerate the quiz questions separately to ensure they're unique
+    logger.log(`[GeminiService] Regenerating quiz questions for ${moduleId}`);
+    const quizSuccess = await regenerateModuleQuiz(moduleId);
+    
+    if (!quizSuccess) {
+      logger.error(`[GeminiService] Failed to regenerate quiz questions`);
+      isValid = false;
+    }
+    
+    // Also regenerate alien challenges
+    logger.log(`[GeminiService] Regenerating alien challenges for ${moduleId}`);
+    const alienChallenges = await generateAlienChallenges(moduleId, 1);
+    
+    if (alienChallenges.length === 0) {
+      logger.error(`[GeminiService] Failed to regenerate alien challenges`);
+      isValid = false;
+    } else {
+      // Update the module with new alien challenges
+      await updateDoc(moduleRef, {
+        alienChallenges,
+        updatedAt: serverTimestamp(),
+        alienChallengesLastUpdated: serverTimestamp()
+      });
+      
+      logger.log(`[GeminiService] Alien challenges updated in Firestore`);
+    }
+    
+    return isValid;
+  } catch (error) {
+    logger.error(`[GeminiService] Error regenerating enhanced module:`, error);
+    return false;
+  }
+};
+
+/**
+ * Force regeneration of quiz questions for a specific module
+ * This ensures we have unique questions tailored to each module
+ */
+export const regenerateModuleQuiz = async (moduleId: string): Promise<boolean> => {
+  try {
+    logger.log(`[GeminiService] Regenerating quiz for module ${moduleId}`);
+    
+    // Get the module topic for context
+    const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
+    
+    // Find which galaxy this module belongs to for context
+    let galaxy = "";
+    for (const [galaxyName, modules] of Object.entries(GALAXY_MODULES)) {
+      if (modules.includes(moduleId)) {
+        galaxy = galaxyName;
+        break;
+      }
+    }
+    
+    // Create a focused prompt for quiz generation
+    const prompt = `Create a set of 10 detailed, in-depth quiz questions about ${topic} for the Sui blockchain platform.
+
+These should be high-quality multiple-choice questions that thoroughly test the user's understanding of ${topic} at different cognitive levels (knowledge, comprehension, application, analysis).
+
+Each question should include:
+1. A clear, specific question about ${topic} that tests deep understanding
+2. Four well-crafted possible answers (labeled 1-4)
+3. The index of the correct answer (1-4)
+4. A comprehensive explanation of why the answer is correct and why the other options are incorrect
+
+Question distribution:
+- 3-4 questions on theoretical concepts and principles of ${topic}
+- 3-4 questions on practical application and implementation details
+- 2-3 questions that involve analyzing code snippets or debugging scenarios
+- At least 1 question on security considerations or best practices
+
+For code-related questions, include properly formatted Move code examples in both the questions and answers. Make sure code examples are accurate, idiomatic Sui Move code.
+
+IMPORTANT: Return your response as raw JSON without markdown formatting or code blocks. The response must be a valid JSON array that can be parsed directly.
+
+Use this exact format:
+[
+  {
+    "question": "Detailed question text about ${topic}?",
+    "options": [
+      "Option 1 with specific, meaningful content",
+      "Option 2 with specific, meaningful content",
+      "Option 3 with specific, meaningful content",
+      "Option 4 with specific, meaningful content"
+    ],
+    "correctAnswer": 1,
+    "explanation": "Thorough explanation of why Option 1 is correct, including technical details and references to Sui/Move concepts. Also explain why the other options are incorrect."
+  },
+  ...
+]
+
+The questions should progressively build in difficulty, starting with fundamental concepts and advancing to more complex applications. Make sure questions are challenging but fair, and cover important aspects of ${topic} thoroughly and accurately.`;
+    
+    // Get module content from Firestore first to avoid overwriting other content
+    const moduleRef = doc(db, 'generatedModules', moduleId);
+    const moduleDoc = await getDoc(moduleRef);
+    
+    if (!moduleDoc.exists()) {
+      logger.log(`[GeminiService] Module ${moduleId} doesn't exist in Firestore yet, creating it first`);
+      await generateLearningModule(moduleId);
+      return false;
+    }
+    
+    // Generate quiz questions with Gemini
+    logger.log(`[GeminiService] Generating quiz questions for ${moduleId}`);
+    const model = getModel(DEFAULT_MODEL);
+    
+    // Use the retry mechanism instead of direct call
+    const result = await makeModelRequestWithRetry(model, prompt);
+    const response = result.response.text();
+    
+    if (!response) {
+      logger.error(`[GeminiService] Failed to generate quiz for ${moduleId}`);
+      return false;
+    }
+    
+    // Process the response
+    let processedQuestions;
+    try {
+      // Parse the JSON response, handling markdown code blocks
+      processedQuestions = extractJsonFromText(response);
+      
+      // Validate the structure
+      if (!Array.isArray(processedQuestions) || processedQuestions.length === 0) {
+        throw new Error('Invalid quiz questions format');
+      }
+      
+      // Add IDs to questions
+      processedQuestions = processedQuestions.map((q, index) => ({
+        ...q,
+        id: `${moduleId}-q${index + 1}`
+      }));
+      
+      logger.log(`[GeminiService] Generated ${processedQuestions.length} quiz questions`);
+    } catch (error) {
+      logger.error(`[GeminiService] Error processing quiz questions:`, error);
+      return false;
+    }
+    
+    // Update the module with new quiz questions
+    const moduleData = moduleDoc.data();
+    
+    await updateDoc(moduleRef, {
+      quiz: processedQuestions,
+      updatedAt: serverTimestamp(),
+      quizLastUpdated: serverTimestamp()
+    });
+    
+    logger.log(`[GeminiService] Successfully updated quiz for module ${moduleId}`);
+    return true;
+    
+  } catch (error) {
+    logger.error(`[GeminiService] Error regenerating quiz:`, error);
+    return false;
+  }
+};
+
+/**
+ * Generate alien challenges (coding exercises) for a module
+ * @param moduleId The ID of the module
+ * @param count Number of challenges to generate
+ * @returns Array of alien challenges
+ */
+export const generateAlienChallenges = async (moduleId: string, count: number = 1): Promise<any[]> => {
+  try {
+    console.log(`[GeminiService] Generating ${count} alien challenges for module ${moduleId}`);
+    
+    // Get the module topic for context
+    const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
+    
+    // Find which galaxy this module belongs to for context
+    let galaxy = "";
+    for (const [galaxyName, modules] of Object.entries(GALAXY_MODULES)) {
+      if (modules.includes(moduleId)) {
+        galaxy = galaxyName;
+        break;
+      }
+    }
+    
+    // Create a focused prompt for alien challenge generation
+    const prompt = `Create ${count} detailed coding challenge${count > 1 ? 's' : ''} about ${topic} for the Sui blockchain platform.
+
+These should be professional-quality, practical exercises that thoroughly test the user's understanding of ${topic} through hands-on Sui Move programming.
+
+Each challenge should include:
+1. An engaging scenario that contextualizes the problem within a real-world Sui blockchain use case
+2. A specific, clearly defined task with measurable success criteria
+3. A realistic code snippet that needs to be completed or fixed, with clear TODOs and comments
+4. The complete solution code that is production-ready, well-documented, and follows best practices
+5. 3-4 helpful hints that guide the user progressively from high-level concepts to specific implementation details without giving away the answer
+
+Challenge requirements:
+- Code must be valid, compilable Sui Move that follows current best practices
+- Solutions should demonstrate proper error handling and security considerations
+- Include comments explaining key parts of the solution and implementation decisions
+- The challenges should be appropriately difficult for the module topic and target intermediate to advanced developers
+- Each challenge should focus on a different aspect of ${topic} to cover the subject comprehensively
+
+IMPORTANT: Return your response as raw JSON without markdown formatting or code blocks. The response must be a valid JSON array that can be parsed directly.
+
+Use this exact format:
+[
+  {
+    "id": "${moduleId}-challenge1",
+    "scenario": "Detailed scenario description that sets up a realistic problem",
+    "task": "Precise description of what the user needs to implement",
+    "codeSnippet": "// Incomplete but valid Sui Move code with clear TODOs\nmodule example::module_name {\n    use sui::object::{Self, UID};\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n    \n    // Struct definitions and code skeleton\n    // ...\n    \n    // TODO: Implement specific function or logic\n}",
+    "solution": "// Complete, working Sui Move code\nmodule example::module_name {\n    use sui::object::{Self, UID};\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n    \n    // Full implementation with comments explaining key parts\n    // ...\n}",
+    "hints": [
+      "Strategic hint about the approach without giving away code details",
+      "More specific hint about a particular concept or pattern to use",
+      "Technical hint about implementation details or syntax",
+      "Final hint that guides toward the specific solution"
+    ]
+  }
+]`;
+
+    // Generate challenges with Gemini
+    const model = getModel(DEFAULT_MODEL);
+    
+    // Use the retry mechanism instead of direct call
+    const result = await makeModelRequestWithRetry(model, prompt);
+    const response = result.response.text();
+    
+    if (!response) {
+      console.error(`[GeminiService] Failed to generate alien challenges for ${moduleId}`);
+      return [];
+    }
+    
+    // Process the response
+    try {
+      // Parse the JSON response, handling markdown code blocks
+      const challenges = extractJsonFromText(response);
+      
+      // Validate the structure
+      if (!Array.isArray(challenges) || challenges.length === 0) {
+        throw new Error('Invalid alien challenges format');
+      }
+      
+      console.log(`[GeminiService] Generated ${challenges.length} alien challenges`);
+      return challenges;
+    } catch (error) {
+      console.error(`[GeminiService] Error processing alien challenges:`, error);
+      return [];
+    }
+    
+  } catch (error) {
+    console.error(`[GeminiService] Error generating alien challenges:`, error);
+    return [];
+  }
+};
+
+/**
+ * Regenerate all modules in a specific galaxy
+ * @param galaxyName The name of the galaxy (e.g., 'genesis', 'explorer')
+ * @returns Object with success status and count of successfully regenerated modules
+ */
+export const regenerateGalaxyModules = async (galaxyName: string): Promise<{success: boolean, count: number}> => {
+  try {
+    console.log(`[GeminiService] Regenerating all modules in ${galaxyName} galaxy`);
+    
+    // Get the modules for this galaxy
+    const modules = GALAXY_MODULES[galaxyName as keyof typeof GALAXY_MODULES];
+    
+    if (!modules || modules.length === 0) {
+      console.error(`[GeminiService] No modules found for galaxy ${galaxyName}`);
+      return { success: false, count: 0 };
+    }
+    
+    console.log(`[GeminiService] Found ${modules.length} modules to regenerate in ${galaxyName} galaxy`);
+    
+    // Track successful regenerations and failures
+    let successCount = 0;
+    const failedModules: string[] = [];
+    
+    // Regenerate each module with increasing delays to avoid overloading the API
+    for (let i = 0; i < modules.length; i++) {
+      const moduleId = modules[i];
+      console.log(`[GeminiService] Regenerating module ${moduleId} (${i + 1}/${modules.length})`);
+      
+      try {
+        const success = await regenerateEnhancedModule(moduleId);
+        
+        if (success) {
+          console.log(`[GeminiService] Successfully regenerated module ${moduleId}`);
+          successCount++;
+        } else {
+          console.error(`[GeminiService] Failed to regenerate module ${moduleId}`);
+          failedModules.push(moduleId);
+        }
+      } catch (error) {
+        console.error(`[GeminiService] Error regenerating module ${moduleId}:`, error);
+        failedModules.push(moduleId);
+      }
+      
+      // Add an increasing delay between regenerations to avoid rate limiting
+      // The delay increases for each module to give the API more time to recover
+      const baseDelay = 20000; // 20 seconds
+      const delayMultiplier = 1 + (i * 0.5); // Increase delay by 50% for each module
+      const delay = Math.min(baseDelay * delayMultiplier, 60000); // Cap at 60 seconds
+      
+      if (i < modules.length - 1) {
+        console.log(`[GeminiService] Waiting ${Math.round(delay / 1000)} seconds before next module...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    // Log the final results
+    console.log(`[GeminiService] Regeneration complete for ${galaxyName} galaxy`);
+    console.log(`[GeminiService] Successfully regenerated ${successCount}/${modules.length} modules`);
+    
+    if (failedModules.length > 0) {
+      console.log(`[GeminiService] Failed modules: ${failedModules.join(', ')}`);
+    }
+    
+    return { 
+      success: successCount > 0, 
+      count: successCount 
+    };
+  } catch (error) {
+    console.error(`[GeminiService] Error regenerating galaxy modules:`, error);
+    return { success: false, count: 0 };
+  }
+}; 
+
+/**
+ * Force regenerate a specific module with high-quality content
+ * This function bypasses caches and ensures detailed content is generated
+ * @param moduleId The module ID to regenerate
+ * @returns True if successful, false otherwise
+ */
+export const forceRegenerateModule = async (moduleId: string): Promise<boolean> => {
+  try {
+    console.log(`[GeminiService] Force regenerating module ${moduleId} with high-quality content`);
+    
+    // Find which galaxy this module belongs to for context
+    let galaxy = "";
+    for (const [galaxyName, modules] of Object.entries(GALAXY_MODULES)) {
+      if (modules.includes(moduleId)) {
+        galaxy = galaxyName;
+        break;
+      }
+    }
+    
+    // Get the module topic for context
+    const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
+    console.log(`[GeminiService] Generating content for topic: ${topic} in galaxy: ${galaxy}`);
+    
+    // Create a detailed prompt for high-quality content generation with progressive learning
+    const prompt = `Create comprehensive, detailed learning content about "${topic}" for the Sui blockchain platform.
+
+This MUST be a professional-quality, in-depth module with exactly 15 flashcards that progressively build knowledge in a structured way:
+
+1. First 7-8 flashcards covering theoretical foundations (REQUIRED):
+   - What ${topic} is and its significance in Sui blockchain development
+   - Core concepts and design principles specific to ${topic}
+   - Key features and characteristics that make ${topic} important
+   - Relationship to other Sui/Move concepts
+   - Fundamental theory and mechanisms behind ${topic}
+   - Real-world use cases and applications
+   - Advanced theoretical considerations
+
+2. Then 7-8 flashcards with practical coding examples (REQUIRED):
+   - Basic syntax and structure with detailed code samples
+   - Step-by-step implementation examples
+   - Creating and using relevant resources/objects
+   - Common patterns and best practices for ${topic}
+   - Error handling and security considerations
+   - Performance optimization techniques
+   - Advanced implementation strategies
+   - Concrete code examples that demonstrate these concepts
+
+Each coding example MUST be properly formatted Sui Move code explained line by line with comments. Include specific Sui Move code examples that demonstrate the concepts.
+
+Format the response as a valid JSON object with this EXACT structure:
+{
+  "title": "A clear, concise title about ${topic}",
+  "description": "A comprehensive introduction to ${topic} in Sui blockchain development",
+  "flashcards": [
+    {
+      "question": "What is ${topic}?",
+      "answer": "Detailed answer with key points, examples, and when relevant, code samples that demonstrate the concept..."
+    },
+    // EXACTLY 15 total flashcards are required - 7-8 theory and 7-8 coding
+  ],
+  "summary": "A detailed summary of the key points covered in this module that reinforces the learning path"
+}
+
+CRITICAL REQUIREMENTS:
+1. EXACTLY 15 total flashcards are required
+2. MUST include 7-8 theoretical flashcards
+3. MUST include 7-8 practical coding flashcards with actual code examples
+4. Content MUST be specifically about ${topic} in the context of Sui blockchain
+5. Each flashcard MUST have substantial, detailed content
+6. DO NOT use generic placeholders or filler content
+7. The response MUST be valid JSON that can be parsed directly
+
+Make sure the content is accurate, educational, highly detailed, and follows a logical progression from basic concepts to more advanced topics.`;
+
+    // Generate module content with enhanced prompt and validation
+    const model = getModel(DEFAULT_MODEL);
+    const result = await makeModelRequestWithRetry(model, prompt);
+    const responseText = result.response.text();
+    
+    // Process the content with our robust JSON extraction
+    let parsedContent;
+    try {
+      parsedContent = extractJsonFromText(responseText);
+      console.log(`[GeminiService] Successfully extracted JSON module content`);
+    } catch (error) {
+      console.error(`[GeminiService] Error extracting module content JSON:`, error);
+      return false;
+    }
+    
+    // Validate the content structure
+    if (!parsedContent || !parsedContent.flashcards || !Array.isArray(parsedContent.flashcards)) {
+      console.error(`[GeminiService] Invalid module content structure`);
+      return false;
+    }
+    
+    // Ensure we have exactly 15 flashcards
+    if (parsedContent.flashcards.length !== 15) {
+      console.warn(`[GeminiService] Expected 15 flashcards but got ${parsedContent.flashcards.length}, fixing...`);
+      
+      // If we have more than 15, trim the excess
+      if (parsedContent.flashcards.length > 15) {
+        parsedContent.flashcards = parsedContent.flashcards.slice(0, 15);
+      }
+      
+      // If we have less than 15, add placeholders
+      while (parsedContent.flashcards.length < 15) {
+        const isTheory = parsedContent.flashcards.length < 8;
+        const index = parsedContent.flashcards.length + 1;
+        
+        parsedContent.flashcards.push({
+          question: isTheory 
+            ? `${index}. What is an important theoretical concept of ${topic}?`
+            : `${index}. How do you implement ${topic} in Sui Move?`,
+          answer: isTheory
+            ? `This is an important theoretical concept in ${topic}. It relates to how Sui blockchain handles advanced data structures and object capabilities.`
+            : `Here's a code example for implementing ${topic} in Sui Move:\n\n\`\`\`move\nmodule examples::${moduleId.replace(/-/g, '_')} {\n    use sui::object::{Self, UID};\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n    \n    // Implementation code would go here\n    // ...\n}\n\`\`\``
+        });
+      }
+    }
+    
+    // Add IDs to the flashcards
+    parsedContent.flashcards = parsedContent.flashcards.map((card: any, index: number) => ({
+      ...card,
+      id: `${moduleId}-card-${index + 1}`
+    }));
+    
+    // Validate content quality (basic check)
+    let hasDetailedContent = true;
+    let hasCodeExamples = false;
+    
+    for (const card of parsedContent.flashcards) {
+      // Check if answers are detailed enough
+      if (!card.answer || card.answer.length < 50) {
+        hasDetailedContent = false;
+        console.warn(`[GeminiService] Flashcard has short answer: ${card.answer}`);
+      }
+      
+      // Check if we have code examples
+      if (card.answer && (card.answer.includes('```move') || card.answer.includes('```sui') || card.answer.includes('module '))) {
+        hasCodeExamples = true;
+      }
+    }
+    
+    if (!hasDetailedContent) {
+      console.warn(`[GeminiService] Generated content lacks detail`);
+    }
+    
+    if (!hasCodeExamples) {
+      console.warn(`[GeminiService] Generated content lacks code examples`);
+    }
+    
+    // Store processed content
+    const moduleContent = {
+      id: moduleId,
+      title: parsedContent.title || `Advanced ${topic} Concepts`,
+      description: parsedContent.description || `Learn about advanced concepts in ${topic} for Sui blockchain development.`,
+      flashcards: parsedContent.flashcards,
+      quiz: [], // Will be generated separately
+      alienChallenges: [], // Will be generated separately
+      summary: parsedContent.summary || `This module covered important aspects of ${topic}.`
+    };
+    
+    // Save to Firestore
+    try {
+      const moduleRef = doc(db, 'generatedModules', moduleId);
+      await setDoc(moduleRef, {
+        ...moduleContent,
+        moduleId,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        wasForceRegenerated: true
+      });
+      
+      console.log(`[GeminiService] Saved high-quality module content to Firestore`);
+      
+      // Clear local cache
+      if (moduleCache[moduleId]) {
+        delete moduleCache[moduleId];
+      }
+      
+      // Now regenerate quiz questions with detailed content
+      console.log(`[GeminiService] Regenerating quiz questions for ${moduleId}`);
+      const quizSuccess = await regenerateHighQualityQuiz(moduleId);
+      
+      if (!quizSuccess) {
+        console.error(`[GeminiService] Failed to regenerate quiz questions`);
+      }
+      
+      // Generate alien challenges that match the content
+      console.log(`[GeminiService] Generating aligned alien challenges for ${moduleId}`);
+      const challengeSuccess = await regenerateAlignedChallenges(moduleId);
+      
+      if (!challengeSuccess) {
+        console.error(`[GeminiService] Failed to generate alien challenges`);
+      }
+      
+      return true;
+    } catch (error) {
+      console.error(`[GeminiService] Error saving module content to Firestore:`, error);
+      return false;
+    }
+  } catch (error) {
+    console.error(`[GeminiService] Error force regenerating module:`, error);
+    return false;
+  }
+};
+
+/**
+ * Generate high-quality quiz questions aligned with module content
+ * @param moduleId The module ID
+ * @returns True if successful, false otherwise
+ */
+export const regenerateHighQualityQuiz = async (moduleId: string): Promise<boolean> => {
+  try {
+    // Get the module topic for context
+    const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
+    
+    // Create an enhanced prompt for quiz generation with theory/code balance
+    const prompt = `Create a set of EXACTLY 10 detailed, in-depth quiz questions about ${topic} for the Sui blockchain platform.
+
+These must be high-quality multiple-choice questions that thoroughly test the user's understanding of ${topic} at different cognitive levels.
+
+REQUIRED Question Distribution:
+- 6-7 questions on theoretical concepts and principles of ${topic}
+- 3-4 questions on practical coding implementation and application
+
+Each question MUST include:
+1. A clear, specific question about ${topic} that tests deep understanding
+2. Four well-crafted possible answers (labeled 1-4)
+3. The index of the correct answer (1-4)
+4. A comprehensive explanation of why the answer is correct and why the other options are incorrect
+
+For code-related questions, include properly formatted Move code examples in both the questions and answers. Make sure code examples are accurate, idiomatic Sui Move code.
+
+IMPORTANT: Return your response as raw JSON without markdown formatting or code blocks. The response must be a valid JSON array that can be parsed directly.
+
+Use this exact format:
+[
+  {
+    "question": "Detailed question text about ${topic}?",
+    "options": [
+      "Option 1 with specific, meaningful content",
+      "Option 2 with specific, meaningful content",
+      "Option 3 with specific, meaningful content",
+      "Option 4 with specific, meaningful content"
+    ],
+    "correctAnswer": 1,
+    "explanation": "Thorough explanation of why Option 1 is correct, including technical details and references to Sui/Move concepts. Also explain why the other options are incorrect."
+  },
+  // EXACTLY 10 questions are required
+]
+
+CRITICAL REQUIREMENTS:
+1. EXACTLY 10 questions are required
+2. MUST include 6-7 theoretical questions
+3. MUST include 3-4 coding implementation questions
+4. Each question MUST be specifically about ${topic}
+5. DO NOT use generic placeholders or filler content
+6. Questions should progressively build in difficulty
+
+The questions should cover important aspects of ${topic} thoroughly and accurately.`;
+
+    // Generate quiz questions
+    const model = getModel(DEFAULT_MODEL);
+    const result = await makeModelRequestWithRetry(model, prompt);
+    const responseText = result.response.text();
+    
+    // Process the content with our robust JSON extraction
+    let quizQuestions;
+    try {
+      quizQuestions = extractJsonFromText(responseText);
+      console.log(`[GeminiService] Successfully extracted quiz questions JSON`);
+    } catch (error) {
+      console.error(`[GeminiService] Error extracting quiz questions JSON:`, error);
+      return false;
+    }
+    
+    // Validate the questions
+    if (!Array.isArray(quizQuestions) || quizQuestions.length === 0) {
+      console.error(`[GeminiService] Invalid quiz questions format`);
+      return false;
+    }
+    
+    // Ensure we have exactly 10 questions
+    if (quizQuestions.length !== 10) {
+      console.warn(`[GeminiService] Expected 10 questions but got ${quizQuestions.length}, fixing...`);
+      
+      // If we have more than 10, trim the excess
+      if (quizQuestions.length > 10) {
+        quizQuestions = quizQuestions.slice(0, 10);
+      }
+      
+      // If we have less than 10, add placeholders
+      while (quizQuestions.length < 10) {
+        const isCoding = quizQuestions.length > 6;
+        const index = quizQuestions.length + 1;
+        
+        quizQuestions.push({
+          question: isCoding 
+            ? `What is the correct way to implement ${topic} in Sui Move?`
+            : `What is an important concept in ${topic}?`,
+          options: isCoding
+            ? [
+                `Use the ${moduleId.replace(/-/g, '_')}::create function`,
+                `Initialize with object::new(ctx)`,
+                `Call transfer::transfer to the sender`,
+                `All of the above`
+              ]
+            : [
+                `It's a core feature of Sui blockchain`,
+                `It's related to object capabilities`,
+                `It's a fundamental concept in Move programming`,
+                `All of the above`
+              ],
+          correctAnswer: 3,
+          explanation: isCoding
+            ? `The correct implementation requires creating the object, initializing it, and transferring it to the sender.`
+            : `All of the options are correct aspects of ${topic} in Sui blockchain development.`
+        });
+      }
+    }
+    
+    // Add IDs to the questions
+    quizQuestions = quizQuestions.map((question: any, index: number) => ({
+      ...question,
+      id: `${moduleId}-quiz-${index + 1}`
+    }));
+    
+    // Save to Firestore
+    try {
+      const moduleRef = doc(db, 'generatedModules', moduleId);
+      await updateDoc(moduleRef, {
+        quiz: quizQuestions,
+        updatedAt: serverTimestamp(),
+        quizLastUpdated: serverTimestamp()
+      });
+      
+      console.log(`[GeminiService] Saved high-quality quiz questions to Firestore`);
+      return true;
+    } catch (error) {
+      console.error(`[GeminiService] Error saving quiz questions to Firestore:`, error);
+      return false;
+    }
+  } catch (error) {
+    console.error(`[GeminiService] Error generating high-quality quiz:`, error);
+    return false;
+  }
+};
+
+/**
+ * Generate alien challenges aligned with module content
+ * @param moduleId The module ID
+ * @returns True if successful, false otherwise
+ */
+export const regenerateAlignedChallenges = async (moduleId: string): Promise<boolean> => {
+  try {
+    // Get the module topic for context
+    const topic = MODULE_TOPICS[moduleId as keyof typeof MODULE_TOPICS] || moduleId;
+    
+    // Create a detailed prompt for aligned alien challenges
+    const prompt = `Create 2 detailed coding challenges about ${topic} for the Sui blockchain platform.
+
+These must be high-quality, practical exercises that thoroughly test the user's understanding of ${topic} through hands-on Sui Move programming.
+
+Each challenge MUST include:
+1. An engaging scenario that contextualizes the problem within a real-world Sui blockchain use case
+2. A specific, clearly defined task with measurable success criteria
+3. A realistic code snippet that needs to be completed or fixed, with clear TODOs and comments
+4. The complete solution code that is production-ready, well-documented, and follows best practices
+5. 3-4 helpful hints that guide the user progressively without giving away the answer
+
+Challenge requirements:
+- Code must be valid, compilable Sui Move that follows current best practices
+- Solutions should demonstrate proper error handling and security considerations
+- Include comments explaining key parts of the solution
+- The challenges should focus on different aspects of ${topic}
+- Challenges should directly relate to the concepts taught in the module
+
+IMPORTANT: Return your response as raw JSON without markdown formatting or code blocks. The response must be a valid JSON array that can be parsed directly.
+
+Use this exact format:
+[
+  {
+    "id": "${moduleId}-challenge1",
+    "scenario": "Detailed scenario description that sets up a realistic problem",
+    "task": "Precise description of what the user needs to implement",
+    "codeSnippet": "// Incomplete but valid Sui Move code with clear TODOs\\nmodule example::module_name {\\n    use sui::object::{Self, UID};\\n    use sui::transfer;\\n    use sui::tx_context::{Self, TxContext};\\n    \\n    // Struct definitions and code skeleton\\n    // ...\\n    \\n    // TODO: Implement specific function or logic\\n}",
+    "solution": "// Complete, working Sui Move code\\nmodule example::module_name {\\n    use sui::object::{Self, UID};\\n    use sui::transfer;\\n    use sui::tx_context::{Self, TxContext};\\n    \\n    // Full implementation with comments explaining key parts\\n    // ...\\n}",
+    "hints": [
+      "Strategic hint about the approach without giving away code details",
+      "More specific hint about a particular concept or pattern to use",
+      "Technical hint about implementation details or syntax",
+      "Final hint that guides toward the specific solution"
+    ]
+  },
+  {
+    "id": "${moduleId}-challenge2",
+    "scenario": "Different scenario focusing on another aspect of ${topic}",
+    "task": "Another implementation task related to ${topic}",
+    "codeSnippet": "// Different code skeleton for the second challenge\\nmodule example::another_module {\\n    // ...\\n}",
+    "solution": "// Complete solution for the second challenge\\nmodule example::another_module {\\n    // ...\\n}",
+    "hints": [
+      "First hint for second challenge",
+      "Second hint for second challenge",
+      "Third hint for second challenge",
+      "Fourth hint for second challenge"
+    ]
+  }
+]`;
+
+    // Generate alien challenges
+    const model = getModel(DEFAULT_MODEL);
+    const result = await makeModelRequestWithRetry(model, prompt);
+    const responseText = result.response.text();
+    
+    // Process the content with our robust JSON extraction
+    let challenges;
+    try {
+      challenges = extractJsonFromText(responseText);
+      console.log(`[GeminiService] Successfully extracted alien challenges JSON`);
+    } catch (error) {
+      console.error(`[GeminiService] Error extracting alien challenges JSON:`, error);
+      return false;
+    }
+    
+    // Validate the challenges
+    if (!Array.isArray(challenges) || challenges.length === 0) {
+      console.error(`[GeminiService] Invalid alien challenges format`);
+      return false;
+    }
+    
+    // Ensure we have exactly 2 challenges
+    if (challenges.length !== 2) {
+      console.warn(`[GeminiService] Expected 2 challenges but got ${challenges.length}, fixing...`);
+      
+      // If we have more than 2, trim the excess
+      if (challenges.length > 2) {
+        challenges = challenges.slice(0, 2);
+      }
+      
+      // If we have less than 2, add placeholders
+      while (challenges.length < 2) {
+        const index = challenges.length + 1;
+        
+        challenges.push({
+          id: `${moduleId}-challenge${index}`,
+          scenario: `Implement a feature related to ${topic} in Sui Move`,
+          task: `Create a module that demonstrates ${topic} functionality`,
+          codeSnippet: `module example::${moduleId.replace(/-/g, '_')}_challenge${index} {\n    use sui::object::{Self, UID};\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n    \n    struct ExampleObject has key, store {\n        id: UID,\n        // Add appropriate fields here\n    }\n    \n    // TODO: Implement required functions\n}`,
+          solution: `module example::${moduleId.replace(/-/g, '_')}_challenge${index} {\n    use sui::object::{Self, UID};\n    use sui::transfer;\n    use sui::tx_context::{Self, TxContext};\n    \n    struct ExampleObject has key, store {\n        id: UID,\n        value: u64\n    }\n    \n    // Create a new example object\n    public fun create(value: u64, ctx: &mut TxContext): ExampleObject {\n        ExampleObject {\n            id: object::new(ctx),\n            value\n        }\n    }\n    \n    // Transfer example object to recipient\n    public entry fun transfer_object(object: ExampleObject, recipient: address) {\n        transfer::transfer(object, recipient);\n    }\n}`,
+          hints: [
+            `Think about what data structures would best represent ${topic}`,
+            `Consider how to initialize the object properly`,
+            `Remember to implement proper transfer mechanics`,
+            `Make sure to handle edge cases and errors`
+          ]
+        });
+      }
+    }
+    
+    // Save to Firestore
+    try {
+      const moduleRef = doc(db, 'generatedModules', moduleId);
+      await updateDoc(moduleRef, {
+        alienChallenges: challenges,
+        updatedAt: serverTimestamp(),
+        alienChallengesLastUpdated: serverTimestamp()
+      });
+      
+      console.log(`[GeminiService] Saved aligned alien challenges to Firestore`);
+      return true;
+    } catch (error) {
+      console.error(`[GeminiService] Error saving alien challenges to Firestore:`, error);
+      return false;
+    }
+  } catch (error) {
+    console.error(`[GeminiService] Error generating aligned challenges:`, error);
+    return false;
+  }
+};
+
+/**
+ * Force regenerate all modules in a galaxy with high-quality content
+ * @param galaxyName The name of the galaxy (e.g., 'genesis', 'explorer')
+ * @returns Object with success status and count of successfully regenerated modules
+ */
+export const forceRegenerateGalaxyModules = async (galaxyName: string): Promise<{success: boolean, count: number}> => {
+  try {
+    console.log(`[GeminiService] Force regenerating all modules in ${galaxyName} galaxy with high-quality content`);
+    
+    // Get the modules for this galaxy
+    const modules = GALAXY_MODULES[galaxyName as keyof typeof GALAXY_MODULES];
+    
+    if (!modules || modules.length === 0) {
+      console.error(`[GeminiService] No modules found for galaxy ${galaxyName}`);
+      return { success: false, count: 0 };
+    }
+    
+    console.log(`[GeminiService] Found ${modules.length} modules to regenerate in ${galaxyName} galaxy`);
+    
+    // Track successful regenerations and failures
+    let successCount = 0;
+    const failedModules: string[] = [];
+    
+    // Regenerate each module with increasing delays to avoid overloading the API
+    for (let i = 0; i < modules.length; i++) {
+      const moduleId = modules[i];
+      console.log(`[GeminiService] Force regenerating module ${moduleId} (${i + 1}/${modules.length})`);
+      
+      try {
+        // Use the force regenerate function for high-quality content
+        const success = await forceRegenerateModule(moduleId);
+        
+        if (success) {
+          console.log(`[GeminiService] Successfully regenerated module ${moduleId} with high-quality content`);
+          successCount++;
+        } else {
+          console.error(`[GeminiService] Failed to regenerate module ${moduleId}`);
+          failedModules.push(moduleId);
+        }
+      } catch (error) {
+        console.error(`[GeminiService] Error regenerating module ${moduleId}:`, error);
+        failedModules.push(moduleId);
+      }
+      
+      // Add an increasing delay between regenerations to avoid rate limiting
+      // The delay increases for each module to give the API more time to recover
+      const baseDelay = 20000; // 20 seconds
+      const delayMultiplier = 1 + (i * 0.5); // Increase delay by 50% for each module
+      const delay = Math.min(baseDelay * delayMultiplier, 60000); // Cap at 60 seconds
+      
+      if (i < modules.length - 1) {
+        console.log(`[GeminiService] Waiting ${Math.round(delay / 1000)} seconds before next module...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    // Log the final results
+    console.log(`[GeminiService] High-quality regeneration complete for ${galaxyName} galaxy`);
+    console.log(`[GeminiService] Successfully regenerated ${successCount}/${modules.length} modules`);
+    
+    if (failedModules.length > 0) {
+      console.log(`[GeminiService] Failed modules: ${failedModules.join(', ')}`);
+    }
+    
+    return { 
+      success: successCount > 0, 
+      count: successCount 
+    };
+  } catch (error) {
+    console.error(`[GeminiService] Error force regenerating galaxy modules:`, error);
+    return { success: false, count: 0 };
+  }
+}; 

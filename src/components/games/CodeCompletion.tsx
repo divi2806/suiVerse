@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Clock, CheckCircle, XCircle } from 'lucide-react';
+import { useSafeInterval, useSafeTimeout } from '@/hooks';
 
 interface CodeCompletionProps {
   onComplete: (score: number, timeLeft: number) => void;
@@ -22,6 +22,8 @@ const CodeCompletion: React.FC<CodeCompletionProps> = ({
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [score, setScore] = useState(0);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const interval = useSafeInterval();
+  const timeout = useSafeTimeout();
 
   // Sample code completion questions
   const questions = [
@@ -96,11 +98,11 @@ public fun transfer<T: key>(
   ];
 
   useEffect(() => {
-    // Timer countdown
-    const timer = setInterval(() => {
+    // Timer countdown using our safe interval hook
+    interval.set(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
-          clearInterval(timer);
+          interval.clear();
           // Time's up - submit current score
           onComplete(score, 0);
           return 0;
@@ -108,9 +110,9 @@ public fun transfer<T: key>(
         return prev - 1;
       });
     }, 1000);
-
-    return () => clearInterval(timer);
-  }, [score, onComplete]);
+    
+    // No need for cleanup in return function - useSafeInterval handles this automatically
+  }, [score, onComplete, interval]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -136,7 +138,8 @@ public fun transfer<T: key>(
     }
 
     // Wait a moment to show correctness, then move to next question
-    setTimeout(() => {
+    // Using our safe timeout hook
+    timeout.set(() => {
       if (currentQuestion < questions.length - 1) {
         setCurrentQuestion(prev => prev + 1);
         setSelectedAnswer(null);

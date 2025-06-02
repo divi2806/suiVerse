@@ -16,7 +16,6 @@ import Profile from "./pages/Profile";
 import Inventory from "./pages/Inventory";
 import Settings from "./pages/Settings";
 import Blazo from "./pages/Blazo";
-import Store from "./components/Store";
 import { SuiClientProvider, WalletProvider as SuiWalletProvider } from '@mysten/dapp-kit';
 import { networkConfig, defaultNetwork } from './lib/sui-config';
 import '@mysten/dapp-kit/dist/index.css';
@@ -28,6 +27,9 @@ import StarField from './components/StarField';
 import ModuleCompletionPopup from './components/ModuleCompletionPopup';
 import DailyStreakModal from './components/DailyStreakModal';
 import LevelUpCelebration from './components/LevelUpCelebration';
+import { initializeGalaxiesMetadata } from '@/services/learningService';
+import Admin from '@/pages/Admin';
+import '@/utils/devTools'; // Import devTools to expose to window
 
 const queryClient = new QueryClient();
 
@@ -164,6 +166,19 @@ const App = () => {
     };
   }, []);
 
+  // Initialize galaxy metadata when app loads
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        await initializeGalaxiesMetadata();
+      } catch (error) {
+        console.error("[App] Error initializing galaxy metadata:", error);
+      }
+    };
+    
+    initializeData();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <SuiClientProvider networks={networkConfig} defaultNetwork={defaultNetwork}>
@@ -195,6 +210,7 @@ const App = () => {
                         <Route path="/inventory" element={<Inventory />} />
                         <Route path="/settings" element={<Settings />} />
                         <Route path="/blazo" element={<Blazo />} />
+                        <Route path="/admin" element={<Admin />} />
                         <Route path="*" element={<NotFound />} />
                       </Routes>
                     </main>

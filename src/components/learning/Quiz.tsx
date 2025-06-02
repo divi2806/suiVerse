@@ -116,11 +116,10 @@ const Quiz: React.FC<QuizProps> = ({ questions, onComplete }) => {
     setTimerActive(false);
     setSelectedOption(optionIndex);
     
-    // Calculate score based on time remaining and correctness
+    // Calculate score based on correctness - 10 points per correct answer
     if (optionIndex === currentQuestion.correctAnswer) {
-      // Bonus points for answering quickly
-      const timeBonus = Math.floor(timeRemaining / 3);
-      const questionScore = 20 + timeBonus; // Base 20 points + time bonus
+      // Award 10 points for each correct answer (100 points total for 10 questions)
+      const questionScore = 10;
       setScore(score + questionScore);
       setCorrectAnswers(correctAnswers + 1);
     }

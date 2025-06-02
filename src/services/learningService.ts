@@ -11,10 +11,12 @@ import {
   query,
   where,
   getDocs,
-  addDoc
+  addDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase-config';
 import { getModule } from './geminiService';
+import logger from '@/utils/logger';
 
 interface ModuleProgress {
   moduleId: string;
@@ -63,7 +65,7 @@ interface Galaxy {
 }
 
 // Constants for rewards
-const XP_REWARDS = {
+export const XP_REWARDS = {
   COMPLETE_FLASHCARD: 10,
   COMPLETE_QUIZ: 50,
   CORRECT_QUIZ_ANSWER: 15,
@@ -386,13 +388,13 @@ export const completeModule = async (
       throw new Error('Wallet address is required');
     }
     
-    console.log(`[LearningService] Completing module ${moduleId} for ${walletAddress}`);
+    logger.log(`[LearningService] Completing module ${moduleId} for ${walletAddress}`);
     
     // Check if module is already completed to avoid duplicate rewards
     const alreadyCompleted = await isModuleCompleted(moduleId, walletAddress);
     
     if (alreadyCompleted) {
-      console.log(`[LearningService] Module ${moduleId} already completed, skipping rewards`);
+      logger.log(`[LearningService] Module ${moduleId} already completed, skipping rewards`);
       return {
         xpEarned: 0,
         suiEarned: 0,
@@ -489,6 +491,70 @@ export const completeModule = async (
             lastUpdated: serverTimestamp()
           });
           
+    // Explicitly update the next module's lock status
+    await updateNextModuleLockStatus(walletAddress, moduleId);
+          
+    // Get the galaxies data to find which galaxy this module belongs to
+    // and unlock the next module in the same galaxy
+    const galaxiesData = await getGalaxiesWithModules(walletAddress);
+    
+    // Find which galaxy this module belongs to
+    for (const galaxy of galaxiesData) {
+      const moduleIndex = galaxy.modules.findIndex(m => m.id === moduleId);
+      
+      if (moduleIndex !== -1) {
+        // Found the module in this galaxy
+        logger.log(`[LearningService] Module ${moduleId} found in galaxy ${galaxy.id} at index ${moduleIndex}`);
+        
+        // Check if there's a next module in the same galaxy
+        if (moduleIndex < galaxy.modules.length - 1) {
+          const nextModuleInGalaxy = galaxy.modules[moduleIndex + 1];
+          
+          // Unlock the next module in the same galaxy
+          logger.log(`[LearningService] Unlocking next module in same galaxy: ${nextModuleInGalaxy.id}`);
+          
+          // Get the module progress subcollection document for the next module
+          const nextModuleRef = doc(collection(userRef, 'moduleProgress'), nextModuleInGalaxy.id);
+          const nextModuleDoc = await getDoc(nextModuleRef);
+          
+          // If the next module document doesn't exist, create it with locked=false
+          if (!nextModuleDoc.exists()) {
+            await setDoc(nextModuleRef, {
+              moduleId: nextModuleInGalaxy.id,
+              completed: false,
+              locked: false, // Explicitly set as unlocked
+              completedLessons: [],
+              lastAccessed: serverTimestamp()
+            });
+          } else {
+            // If it exists, update it to be unlocked
+            await updateDoc(nextModuleRef, {
+              locked: false
+            });
+          }
+        }
+        
+        // Get the latest user data to check completed modules
+        const latestUserDoc = await getDoc(userRef);
+        const latestUserData = latestUserDoc.data();
+        const completedModules = latestUserData.completedModules || [];
+        
+        // Check if all modules in this galaxy are now completed
+        const allModulesInGalaxyCompleted = galaxy.modules.every(m => 
+          completedModules.includes(m.id) || m.id === moduleId
+        );
+        
+        if (allModulesInGalaxyCompleted) {
+          logger.log(`[LearningService] All modules in galaxy ${galaxy.id} are now completed, unlocking next galaxy`);
+          
+          // Unlock the next galaxy
+          await unlockNextGalaxy(walletAddress, galaxy.id);
+        }
+        
+        break; // Found the module, no need to check other galaxies
+      }
+    }
+          
     // If mystery box awarded, add it to user's inventory
     if (mysteryBoxAwarded) {
       const inventoryRef = collection(db, 'user_inventory');
@@ -513,7 +579,7 @@ export const completeModule = async (
         timestamp: serverTimestamp()
       });
       
-    console.log(`[LearningService] Module ${moduleId} completed. XP: ${xpReward}, SUI: ${suiReward}`);
+    logger.log(`[LearningService] Module ${moduleId} completed. XP: ${xpReward}, SUI: ${suiReward}`);
     
     // Return results
     return {
@@ -524,7 +590,7 @@ export const completeModule = async (
       mysteryBoxAwarded
     };
   } catch (error) {
-    console.error('[LearningService] Error completing module:', error);
+    logger.error('[LearningService] Error completing module:', error);
     
     // Return a minimal success response with default values to avoid UI errors
     return {
@@ -851,7 +917,7 @@ function getAchievementType(id: string): string {
 export const getGalaxiesWithModules = async (walletAddress: string) => {
   try {
     if (!walletAddress) {
-      console.warn('[Learning] No wallet address provided, using fallback data');
+      logger.warn('[Learning] No wallet address provided, using fallback data');
       return await fetchGalaxiesWithModules();
     }
     
@@ -863,7 +929,7 @@ export const getGalaxiesWithModules = async (walletAddress: string) => {
     const progressDoc = await getDoc(userProgressRef);
     
     if (!progressDoc.exists()) {
-      console.warn('[Learning] No user progress found, using fallback data');
+      logger.warn('[Learning] No user progress found, using fallback data');
       return await fetchGalaxiesWithModules();
     }
     
@@ -895,17 +961,40 @@ export const getGalaxiesWithModules = async (walletAddress: string) => {
         // Check if this module has progress data
         const hasProgress = moduleProgressMap[module.id];
         
-        // Determine if module is locked
-        const moduleLocked = (
-          (moduleIndex > 0 && !galaxy.modules[moduleIndex-1].completed) || // Previous module must be completed
-          !galaxyUnlocked // Galaxy must be unlocked
-        );
-        
         // Determine if module is completed
         const moduleCompleted = (
           userProgress.completedModules && 
           userProgress.completedModules.includes(module.id)
         );
+        
+        // Determine if module is locked
+        let moduleLocked = !galaxyUnlocked; // Galaxy must be unlocked
+        
+        // If not the first module in the galaxy, check if previous module is completed
+        if (moduleIndex > 0 && galaxyUnlocked) {
+          const prevModule = galaxy.modules[moduleIndex-1];
+          // Check if previous module is completed either by its property or in completedModules array
+          const isPrevModuleCompleted = prevModule.completed || 
+            (userProgress.completedModules && userProgress.completedModules.includes(prevModule.id));
+          
+          // Module is locked only if previous module is not completed
+          moduleLocked = !isPrevModuleCompleted;
+          
+          // Log the locking status for debugging
+          if (moduleIndex === 1) { // Only log for the second module in each galaxy to reduce noise
+            logger.log(`[LearningService] Galaxy ${galaxy.id} (${galaxy.name}) - Module ${module.id} (${module.title}): locked=${moduleLocked}, prevModuleCompleted=${isPrevModuleCompleted}`);
+          }
+        }
+        
+        // First module in a galaxy is always unlocked if the galaxy is unlocked
+        if (moduleIndex === 0 && galaxyUnlocked) {
+          moduleLocked = false;
+        }
+        
+        // If module is in completedModules, it should never be locked
+        if (moduleCompleted) {
+          moduleLocked = false;
+        }
         
         // Determine if this is current module
         const isCurrent = userProgress.currentModuleId === module.id;
@@ -939,7 +1028,7 @@ export const getGalaxiesWithModules = async (walletAddress: string) => {
     
     return galaxiesWithProgress;
   } catch (error) {
-    console.error('[Learning] Error getting galaxies with modules:', error);
+    logger.error('[Learning] Error getting galaxies with modules:', error);
     return await fetchGalaxiesWithModules();
   }
 };
@@ -1306,18 +1395,18 @@ export const isModuleCompleted = async (
     
     // If no wallet address is available, module is not completed
     if (!walletAddress) {
-      console.warn(`[LearningService] Cannot check module completion without wallet address`);
+      logger.warn(`[LearningService] Cannot check module completion without wallet address`);
       return false;
     }
     
-    console.log(`[LearningService] Checking module completion for ${moduleId}, wallet: ${walletAddress}`);
+    logger.log(`[LearningService] Checking module completion for ${moduleId}, wallet: ${walletAddress}`);
     
     // Check Firestore to see if this module is in the user's completedModules array
     const userProgressRef = doc(db, 'learningProgress', walletAddress);
     const userProgressDoc = await getDoc(userProgressRef);
     
     if (!userProgressDoc.exists()) {
-      console.warn(`[LearningService] No learning progress document found for ${walletAddress}`);
+      logger.warn(`[LearningService] No learning progress document found for ${walletAddress}`);
       return false;
     }
     
@@ -1326,7 +1415,7 @@ export const isModuleCompleted = async (
     
     // First check if it's in the completedModules array
     let moduleCompleted = completedModules.includes(moduleId);
-    console.log(`[LearningService] Module ${moduleId} in completedModules array: ${moduleCompleted}`);
+    logger.log(`[LearningService] Module ${moduleId} in completedModules array: ${moduleCompleted}`);
     
     // If not found in the array, check the module-specific document as a fallback
     if (!moduleCompleted) {
@@ -1337,21 +1426,21 @@ export const isModuleCompleted = async (
         if (moduleProgressDoc.exists()) {
           const moduleData = moduleProgressDoc.data();
           const moduleDocCompleted = moduleData.completed === true;
-          console.log(`[LearningService] Module ${moduleId} in module document: ${moduleDocCompleted}`);
+          logger.log(`[LearningService] Module ${moduleId} in module document: ${moduleDocCompleted}`);
           
           // If we found that it's completed in the module document but not in the array,
           // update the completedModules array for consistency
           if (moduleDocCompleted && !completedModules.includes(moduleId)) {
-            console.log(`[LearningService] Repairing completedModules array for ${moduleId}`);
+            logger.log(`[LearningService] Repairing completedModules array for ${moduleId}`);
             try {
               await updateDoc(userProgressRef, {
                 completedModules: arrayUnion(moduleId),
                 lastUpdated: serverTimestamp()
               });
-              console.log(`[LearningService] Successfully repaired completedModules array for ${moduleId}`);
+              logger.log(`[LearningService] Successfully repaired completedModules array for ${moduleId}`);
               moduleCompleted = true;
             } catch (updateError) {
-              console.error(`[LearningService] Error updating completedModules array:`, updateError);
+              logger.error(`[LearningService] Error updating completedModules array:`, updateError);
               // Still return true if the module document shows completion
               moduleCompleted = true;
             }
@@ -1359,25 +1448,25 @@ export const isModuleCompleted = async (
             moduleCompleted = moduleDocCompleted;
           }
         } else {
-          console.log(`[LearningService] No module progress document found for ${moduleId}`);
+          logger.log(`[LearningService] No module progress document found for ${moduleId}`);
         }
       } catch (error) {
-        console.error(`[LearningService] Error checking module progress:`, error);
+        logger.error(`[LearningService] Error checking module progress:`, error);
       }
     }
     
-    console.log(`[LearningService] Final module completion status for ${moduleId}: ${moduleCompleted}`);
+    logger.log(`[LearningService] Final module completion status for ${moduleId}: ${moduleCompleted}`);
     return moduleCompleted;
   } catch (error) {
-    console.error(`[LearningService] Error checking if module completed:`, error);
+    logger.error(`[LearningService] Error checking if module completed:`, error);
     return false;
   }
 };
 
 // Function to provide fallback galaxy data when Firebase fetch fails
 function getFallbackGalaxiesWithModules() {
-  console.log('[Learning] Using fallback galaxy data - Firebase fetch failed');
-  console.log('[Learning] Generating fallback data for fallback galaxies');
+  logger.log('[Learning] Using fallback galaxy data - Firebase fetch failed');
+  logger.log('[Learning] Generating fallback data for fallback galaxies');
 
   // Define complete fallback data for all galaxies
   const fallbackGalaxies = [
@@ -1758,9 +1847,9 @@ export const fetchGalaxiesWithModules = async (): Promise<Galaxy[]> => {
     const galaxiesSnapshot = await getDocs(collection(db, 'galaxies'));
     
     if (galaxiesSnapshot.empty) {
-      console.log('[Learning] No galaxies found in Firebase, using fallback data');
-      console.log('[Learning] Attempted to fetch from collection:', 'learningGalaxies');
-      console.log('[Learning] No wallet address provided for user-specific data');
+      logger.log('[Learning] No galaxies found in Firebase, using fallback data');
+      logger.log('[Learning] Attempted to fetch from collection:', 'learningGalaxies');
+      logger.log('[Learning] No wallet address provided for user-specific data');
       return getFallbackGalaxiesWithModules() as Galaxy[];
     }
     
@@ -1808,15 +1897,15 @@ export const fetchGalaxiesWithModules = async (): Promise<Galaxy[]> => {
     
     // If no galaxies were retrieved, use fallback
     if (galaxies.length === 0) {
-      console.log('[Learning] No galaxies processed from Firebase, using fallback data');
+      logger.log('[Learning] No galaxies processed from Firebase, using fallback data');
       return getFallbackGalaxiesWithModules() as Galaxy[];
     }
     
     return galaxies;
   } catch (error) {
-    console.error('[Learning] Firebase fetch failed with error:', error);
-    console.log('[Learning] Error details:', JSON.stringify(error, null, 2));
-    console.log('[Learning] Using fallback galaxy data - Firebase fetch failed');
+    logger.error('[Learning] Firebase fetch failed with error:', error);
+    logger.log('[Learning] Error details:', JSON.stringify(error, null, 2));
+    logger.log('[Learning] Using fallback galaxy data - Firebase fetch failed');
     return getFallbackGalaxiesWithModules() as Galaxy[];
   }
 };
@@ -1832,7 +1921,7 @@ export const unlockNextGalaxy = async (
   currentGalaxy: number
 ): Promise<boolean> => {
   try {
-    console.log(`[LearningService] Checking if galaxy ${currentGalaxy} is completed and unlocking next galaxy for ${walletAddress}`);
+    logger.log(`[LearningService] Checking if galaxy ${currentGalaxy} is completed and unlocking next galaxy for ${walletAddress}`);
     
     // Get galaxies with modules to check completion status
     const galaxiesWithModules = await getGalaxiesWithModules(walletAddress);
@@ -1840,22 +1929,44 @@ export const unlockNextGalaxy = async (
     // Find the current galaxy data
     const currentGalaxyData = galaxiesWithModules.find(g => g.id === currentGalaxy);
     if (!currentGalaxyData) {
-      console.warn(`[LearningService] Galaxy ${currentGalaxy} not found for user ${walletAddress}`);
+      logger.warn(`[LearningService] Galaxy ${currentGalaxy} not found for user ${walletAddress}`);
       return false;
     }
+    
+    // Get user progress to check completed modules
+    const userProgressRef = doc(db, 'learningProgress', walletAddress);
+    const userProgressDoc = await getDoc(userProgressRef);
+    
+    if (!userProgressDoc.exists()) {
+      logger.warn(`[LearningService] User progress document not found for ${walletAddress}`);
+      return false;
+    }
+    
+    const userProgress = userProgressDoc.data();
+    const completedModules = userProgress.completedModules || [];
+    
+    logger.log(`[LearningService] User has completed ${completedModules.length} modules: ${completedModules.join(', ')}`);
+    
+    // Log all modules in the current galaxy
+    logger.log(`[LearningService] Galaxy ${currentGalaxy} has ${currentGalaxyData.modules.length} modules:`);
+    currentGalaxyData.modules.forEach(module => {
+      logger.log(`[LearningService] - Module ${module.id}: completed=${completedModules.includes(module.id)}`);
+    });
     
     // Check if all modules in the current galaxy are completed
-    const allModulesCompleted = currentGalaxyData.modules.every(m => m.completed);
+    const allModulesCompleted = currentGalaxyData.modules.every(module => completedModules.includes(module.id));
     
     if (!allModulesCompleted) {
-      console.log(`[LearningService] Not all modules in galaxy ${currentGalaxy} are completed yet`);
-      return false;
-    }
+      logger.log(`[LearningService] Not all modules in galaxy ${currentGalaxy} are completed yet`);
+    return false;
+  }
+    
+    logger.log(`[LearningService] All modules in galaxy ${currentGalaxy} are completed!`);
     
     // Find the next galaxy
     const nextGalaxyIndex = galaxiesWithModules.findIndex(g => g.id === currentGalaxy) + 1;
     if (nextGalaxyIndex >= galaxiesWithModules.length) {
-      console.log(`[LearningService] No next galaxy after ${currentGalaxy}`);
+      logger.log(`[LearningService] No next galaxy after ${currentGalaxy}`);
       return false;
     }
     
@@ -1863,26 +1974,44 @@ export const unlockNextGalaxy = async (
     
     // If next galaxy is already unlocked, no need to update
     if (nextGalaxy.unlocked) {
-      console.log(`[LearningService] Next galaxy ${nextGalaxy.id} is already unlocked`);
+      logger.log(`[LearningService] Next galaxy ${nextGalaxy.id} is already unlocked`);
       return true;
     }
     
+    // Find the first module in the next galaxy
+    const firstModule = nextGalaxy.modules.length > 0 ? nextGalaxy.modules[0] : null;
+    
+    if (!firstModule) {
+      logger.warn(`[LearningService] No modules found in galaxy ${nextGalaxy.id}`);
+      return false;
+    }
+    
+    // Calculate the new rocket position
+    const newRocketPosition = {
+      x: nextGalaxy.position.x + firstModule.position.x,
+      y: nextGalaxy.position.y + firstModule.position.y
+    };
+    
     // Update user progress to unlock next galaxy
-    const userProgressRef = doc(db, 'learningProgress', walletAddress);
     await updateDoc(userProgressRef, {
       currentGalaxy: nextGalaxy.id,
+      unlockedGalaxies: arrayUnion(nextGalaxy.id),
+      currentModuleId: firstModule.id,
+      rocketPosition: newRocketPosition,
       lastUpdated: serverTimestamp()
     });
     
-    console.log(`[LearningService] Successfully unlocked galaxy ${nextGalaxy.id} for user ${walletAddress}`);
+    logger.log(`[LearningService] Successfully unlocked galaxy ${nextGalaxy.id} for user ${walletAddress}`);
+    logger.log(`[LearningService] Updated rocket position to ${JSON.stringify(newRocketPosition)}`);
+    logger.log(`[LearningService] Set current module to ${firstModule.id}`);
     
     // Record activity
-    await addLearningActivity(walletAddress, {
+          await addLearningActivity(walletAddress, {
       type: 'galaxy_unlocked',
       title: `${nextGalaxy.name} Unlocked`,
       description: `You've unlocked ${nextGalaxy.name} by completing ${currentGalaxyData.name}`,
-      timestamp: serverTimestamp()
-    });
+            timestamp: serverTimestamp()
+          });
     
     // Award achievement for completing a galaxy
     await unlockAchievement(walletAddress, `galaxy_${currentGalaxy}_completed`, XP_REWARDS.COMPLETE_GALAXY);
@@ -1892,7 +2021,274 @@ export const unlockNextGalaxy = async (
     
     return true;
   } catch (error) {
-    console.error(`[LearningService] Error unlocking next galaxy:`, error);
+    logger.error(`[LearningService] Error unlocking next galaxy:`, error);
+    return false;
+  }
+};
+
+/**
+ * Initialize the galaxies metadata in Firebase if it doesn't exist
+ * This ensures we always have galaxy data available
+ */
+export const initializeGalaxiesMetadata = async (): Promise<boolean> => {
+  try {
+    // Check if galaxies collection already exists and has data
+    const galaxiesSnapshot = await getDocs(collection(db, 'galaxies'));
+    
+    // Check if modules collection also has data
+    const modulesSnapshot = await getDocs(collection(db, 'modules'));
+    
+    if (!galaxiesSnapshot.empty && !modulesSnapshot.empty) {
+      logger.log(`[Learning] Galaxies metadata already exists in Firebase (${galaxiesSnapshot.size} galaxies, ${modulesSnapshot.size} modules)`);
+      return true;
+    }
+    
+    logger.log('[Learning] Initializing galaxies metadata in Firebase');
+    
+    // Get fallback galaxies data to use as initial data
+    const galaxiesData = getFallbackGalaxiesWithModules();
+    
+    // Create a batch for efficient writes
+    const batch = writeBatch(db);
+    
+    // Add each galaxy to the batch
+    for (const galaxy of galaxiesData) {
+      const galaxyRef = doc(db, 'galaxies', galaxy.id.toString());
+      
+      // Remove modules array before storing in galaxies collection
+      const { modules, ...galaxyData } = galaxy;
+      
+      batch.set(galaxyRef, {
+        ...galaxyData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      // Store each module in the modules collection
+      for (const module of modules) {
+        const moduleRef = doc(db, 'modules', module.id);
+        batch.set(moduleRef, {
+          ...module,
+          galaxyId: galaxy.id,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+          });
+        }
+      }
+      
+    // Commit the batch
+    await batch.commit();
+    
+    logger.log('[Learning] Successfully initialized galaxies metadata in Firebase');
+    return true;
+  } catch (error) {
+    logger.error('[Learning] Error initializing galaxies metadata:', error);
+    return false;
+  }
+};
+
+/**
+ * Update the next module's locking status when a module is completed
+ * This ensures the next module in the same galaxy is properly unlocked
+ */
+export const updateNextModuleLockStatus = async (
+  walletAddress: string,
+  completedModuleId: string
+): Promise<boolean> => {
+  try {
+    logger.log(`[LearningService] Updating lock status for modules after ${completedModuleId}`);
+    
+    // Get galaxies with modules to find the next module
+    const galaxiesWithModules = await getGalaxiesWithModules(walletAddress);
+    
+    // Find which galaxy and module index this module belongs to
+    let moduleGalaxy = null;
+    let moduleIndex = -1;
+    
+    for (const galaxy of galaxiesWithModules) {
+      const foundModuleIndex = galaxy.modules.findIndex(m => m.id === completedModuleId);
+      if (foundModuleIndex !== -1) {
+        moduleGalaxy = galaxy;
+        moduleIndex = foundModuleIndex;
+        break;
+      }
+    }
+    
+    if (!moduleGalaxy || moduleIndex === -1) {
+      logger.warn(`[LearningService] Could not find galaxy for module: ${completedModuleId}`);
+      return false;
+    }
+    
+    logger.log(`[LearningService] Found module ${completedModuleId} in galaxy ${moduleGalaxy.id} at index ${moduleIndex}`);
+    
+    // Check if there's a next module in the same galaxy
+    if (moduleIndex < moduleGalaxy.modules.length - 1) {
+      // There is a next module in the same galaxy, unlock it
+      const nextModule = moduleGalaxy.modules[moduleIndex + 1];
+      logger.log(`[LearningService] Next module in same galaxy: ${nextModule.id}`);
+      
+      // Get user progress document
+      const userProgressRef = doc(db, 'learningProgress', walletAddress);
+      const userProgressDoc = await getDoc(userProgressRef);
+      
+      if (!userProgressDoc.exists()) {
+        logger.warn(`[LearningService] User progress document not found`);
+        return false;
+      }
+      
+      // Handle specific module transitions
+      // Special handling for move-language (module 3) to objects-ownership (module 4)
+      if (completedModuleId === 'move-language') {
+        logger.log(`[LearningService] Special handling for move-language to objects-ownership transition`);
+        
+        // Force update the unlockedModules in the user's progress document
+        await updateDoc(userProgressRef, {
+          [`unlockedModules`]: arrayUnion('objects-ownership')
+        });
+        
+        // Also update currentModuleId to the next module if it's still set to the completed one
+        const userData = userProgressDoc.data();
+        if (userData.currentModuleId === completedModuleId) {
+          await updateDoc(userProgressRef, {
+            currentModuleId: 'objects-ownership'
+          });
+        }
+        
+        logger.log(`[LearningService] Forced unlock of objects-ownership module`);
+        return true;
+      }
+      
+      // Normal case: Unlock the next module in the current galaxy
+      await updateDoc(userProgressRef, {
+        [`unlockedModules`]: arrayUnion(nextModule.id)
+      });
+      
+      logger.log(`[LearningService] Unlocked next module: ${nextModule.id}`);
+      return true;
+    } else {
+      // This was the last module in the galaxy, check if there's a next galaxy
+      const galaxyIndex = galaxiesWithModules.findIndex(g => g.id === moduleGalaxy.id);
+      
+      if (galaxyIndex < galaxiesWithModules.length - 1) {
+        // There is a next galaxy, make sure it's unlocked
+        const nextGalaxy = galaxiesWithModules[galaxyIndex + 1];
+        logger.log(`[LearningService] This was the last module in galaxy ${moduleGalaxy.id}, next galaxy is ${nextGalaxy.id}`);
+        
+        // Check if all modules in the current galaxy are completed
+        const userProgressRef = doc(db, 'learningProgress', walletAddress);
+        const userProgressDoc = await getDoc(userProgressRef);
+        
+        if (!userProgressDoc.exists()) {
+          logger.warn(`[LearningService] User progress document not found`);
+          return false;
+        }
+        
+        const userData = userProgressDoc.data();
+        const completedModules = userData.completedModules || [];
+        
+        const allModulesInGalaxyCompleted = moduleGalaxy.modules.every(m => 
+          completedModules.includes(m.id)
+        );
+        
+        if (allModulesInGalaxyCompleted) {
+          // Unlock the next galaxy
+          await unlockNextGalaxy(walletAddress, moduleGalaxy.id);
+          return true;
+        }
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    logger.error(`[LearningService] Error updating next module lock status:`, error);
+    return false;
+  }
+};
+
+/**
+ * Force update the completion status of a module and unlock the next module
+ * This can be used to fix issues where the UI doesn't properly reflect the completion status
+ */
+export const forceUpdateModuleStatus = async (
+  walletAddress: string,
+  moduleId: string
+): Promise<boolean> => {
+  try {
+    logger.log(`[LearningService] Forcing update of module status for ${moduleId}`);
+    
+    // Get user progress document
+    const userProgressRef = doc(db, 'learningProgress', walletAddress);
+    const userProgressDoc = await getDoc(userProgressRef);
+    
+    if (!userProgressDoc.exists()) {
+      logger.warn(`[LearningService] User progress document not found`);
+      return false;
+    }
+    
+    const userData = userProgressDoc.data();
+    const completedModules = userData.completedModules || [];
+    
+    // If module is not in completedModules array, add it
+    if (!completedModules.includes(moduleId)) {
+      await updateDoc(userProgressRef, {
+        completedModules: arrayUnion(moduleId)
+      });
+      logger.log(`[LearningService] Added ${moduleId} to completedModules array`);
+    }
+    
+    // Determine the next module ID
+    let nextModuleId = '';
+    if (moduleId === 'intro-to-sui') {
+      nextModuleId = 'smart-contracts-101';
+    } else if (moduleId === 'smart-contracts-101') {
+      nextModuleId = 'move-language';
+    } else if (moduleId === 'move-language') {
+      nextModuleId = 'objects-ownership';
+    } else if (moduleId === 'objects-ownership') {
+      nextModuleId = 'advanced-concepts';
+    } else {
+      // For other modules, try to parse the ID
+      const matches = moduleId.match(/^([a-z-]+)-(\d+)$/);
+      if (matches && matches.length === 3) {
+        const prefix = matches[1];
+        const num = parseInt(matches[2], 10);
+        nextModuleId = `${prefix}-${num + 1}`;
+      }
+    }
+    
+    // Unlock the next module
+    if (nextModuleId) {
+      // Create or update the unlockedModules array
+      await updateDoc(userProgressRef, {
+        unlockedModules: arrayUnion(nextModuleId)
+      });
+      
+      logger.log(`[LearningService] Unlocked next module: ${nextModuleId}`);
+    }
+    
+    // If this is move-language, we need special handling to ensure Explorer galaxy modules are available
+    if (moduleId === 'move-language') {
+      await updateDoc(userProgressRef, {
+        unlockedGalaxies: arrayUnion(2), // Explorer galaxy (ID 2)
+        unlockedModules: arrayUnion('objects-ownership')
+      });
+      logger.log(`[LearningService] Forced unlock of Explorer galaxy and objects-ownership module`);
+    }
+    
+    // Ensure module is marked as not locked in moduleProgress collection
+    const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), moduleId);
+    await setDoc(moduleProgressRef, { 
+      completed: true,
+      locked: false,
+      lastUpdated: serverTimestamp()
+    }, { merge: true });
+    
+    // Update the next module's lock status
+    await updateNextModuleLockStatus(walletAddress, moduleId);
+    
+    return true;
+  } catch (error) {
+    logger.error(`[LearningService] Error forcing update of module status:`, error);
     return false;
   }
 };

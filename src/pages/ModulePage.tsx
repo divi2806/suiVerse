@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,8 @@ import {
   checkDailyStreak,
   restoreStreak,
   ensureLearningProgressInitialized,
-  isModuleCompleted
+  isModuleCompleted,
+  XP_REWARDS
 } from '@/services/learningService';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, Rocket, Star, Trophy, Award, CircleCheck, CheckCircle } from 'lucide-react';
@@ -32,6 +33,8 @@ import DailyStreakModal from '@/components/DailyStreakModal';
 // Import the streakUtils functions explicitly with a different name to avoid conflicts
 import * as streakUtils from '@/utils/streakUtils';
 import ModuleCompletionPopup from '@/components/ModuleCompletionPopup';
+// Add logger import at the top of the file
+import logger from '@/utils/logger';
 
 // Add type declaration for the window object at the top of the file
 declare global {
@@ -238,19 +241,14 @@ const ModulePage: React.FC = () => {
       
       // Log the generated quiz questions for debugging
       if (content.quiz && content.quiz.length > 0) {
-        console.table(content.quiz.map(q => ({
-          question: q.question.substring(0, 50) + (q.question.length > 50 ? '...' : ''),
-          options: q.options.length,
-          correctAnswer: q.correctAnswer,
-          hasExplanation: !!q.explanation
-        })));
+        logger.log(`[ModulePage] Module ${moduleId} has ${content.quiz.length} quiz questions`);
       } else {
-        console.warn(`[ModulePage] No quiz questions found for module ${moduleId}`);
+        logger.warn(`[ModulePage] No quiz questions found for module ${moduleId}`);
       }
 
       // Ensure the module has alienChallenges
       if (!content.alienChallenges || content.alienChallenges.length === 0) {
-        console.warn(`[ModulePage] No alien challenges found for module ${moduleId}, adding fallback challenge`);
+        logger.warn(`[ModulePage] No alien challenges found for module ${moduleId}, adding fallback challenge`);
         
         // Create a fallback alien challenge
         content.alienChallenges = [{
@@ -294,7 +292,7 @@ const ModulePage: React.FC = () => {
       
       // Log alien challenges for debugging
       if (content.alienChallenges && content.alienChallenges.length > 0) {
-        console.log(`[ModulePage] Module ${moduleId} has ${content.alienChallenges.length} alien challenges`);
+        logger.log(`[ModulePage] Module ${moduleId} has ${content.alienChallenges.length} alien challenges`);
       }
       
       setModuleContent(content);
@@ -432,10 +430,10 @@ const ModulePage: React.FC = () => {
       setTimeout(() => {
         // Always check if alienChallenges exists and has at least one item
         if (moduleContent.alienChallenges && moduleContent.alienChallenges.length > 0) {
-          console.log(`[ModulePage] Moving to alien challenge for module ${moduleId}`);
+          logger.log(`[ModulePage] Moving to alien challenge for module ${moduleId}`);
           setCurrentSection('alienChallenge');
         } else {
-          console.log(`[ModulePage] No alien challenges found for module ${moduleId}, moving to completion`);
+          logger.log(`[ModulePage] No alien challenges found for module ${moduleId}, moving to completion`);
           setCurrentSection('completion');
         }
       }, 1000);
@@ -576,7 +574,7 @@ const ModulePage: React.FC = () => {
         const galaxiesData = await getGalaxiesWithModules(walletAddress);
         let foundCurrentModule = false;
         let nextId = '';
-        
+      
         // Find the current module and determine the next one
         for (const galaxy of galaxiesData) {
           for (let i = 0; i < galaxy.modules.length; i++) {
@@ -691,7 +689,7 @@ const ModulePage: React.FC = () => {
           result = await completeModule(walletAddress, moduleId, nextModuleId);
           break; // Success, exit the loop
         } catch (error) {
-          console.error('[ModulePage] Error completing module:', error);
+          logger.error('[ModulePage] Error completing module:', error);
           retryCount++;
           if (retryCount < 3) {
             // Wait before retrying (exponential backoff)
@@ -702,7 +700,7 @@ const ModulePage: React.FC = () => {
       
       // Update local state even if there's a server error
       if (!result) {
-        console.warn('[ModulePage] Using fallback completion logic');
+        logger.warn('[ModulePage] Using fallback completion logic');
         
         // Create a fallback result with reasonable default values
         result = {
@@ -723,9 +721,9 @@ const ModulePage: React.FC = () => {
             lastActivityTimestamp: serverTimestamp()
           });
           
-          console.log('[ModulePage] Manual Firebase update successful');
+          logger.log('[ModulePage] Manual Firebase update successful');
         } catch (directError) {
-          console.error('[ModulePage] Manual Firebase update failed:', directError);
+          logger.error('[ModulePage] Manual Firebase update failed:', directError);
         }
         
         toast({
@@ -745,8 +743,16 @@ const ModulePage: React.FC = () => {
       // Refresh user data from firestore to update the navbar
       await refreshUserData();
       
-      // Show the mission completed modal for all modules
-      setShowMissionCompletedModal(true);
+      // Check if we've already shown the mission completed modal for this module in this session
+      const missionCompletedKey = `module_${moduleId}_completed`;
+      const hasShownMissionCompletedModal = sessionStorage.getItem(missionCompletedKey) === 'true';
+      
+      if (!hasShownMissionCompletedModal) {
+        // Set the flag to prevent showing it again
+        sessionStorage.setItem(missionCompletedKey, 'true');
+        
+        // Show the mission completed modal for all modules
+        setShowMissionCompletedModal(true);
       
       // Check if user leveled up
       if (result.leveledUp && result.newLevel) {
@@ -782,6 +788,9 @@ const ModulePage: React.FC = () => {
           variant: "default",
           className: "mystery-box-toast",
         });
+        }
+      } else {
+        logger.log(`[ModulePage] Mission completed modal already shown for module ${moduleId}, skipping`);
       }
       
       // Check if this was the last module in the current galaxy and unlock the next galaxy if needed
@@ -799,43 +808,55 @@ const ModulePage: React.FC = () => {
             isModuleCompleted(walletAddress, m.id) // Check completion through API
           );
           
-          console.log(`[ModulePage] Galaxy completion check in handleCompleteModule:`, {
+          logger.log(`[ModulePage] Galaxy completion check in handleCompleteModule:`, {
             galaxyId: currentGalaxy.id,
             moduleId,
             allModulesInGalaxyCompleted
           });
           
-          if (allModulesInGalaxyCompleted) {
-            console.log(`[ModulePage] All modules in galaxy ${currentGalaxy.id} completed, unlocking next galaxy`);
+          // Find the next galaxy to check if it's already unlocked
+          const nextGalaxyIndex = galaxiesData.findIndex(g => g.id === currentGalaxy.id) + 1;
+          
+          if (allModulesInGalaxyCompleted && nextGalaxyIndex < galaxiesData.length) {
+            const nextGalaxy = galaxiesData[nextGalaxyIndex];
             
-            // Import unlockNextGalaxy from learningService
-            const { unlockNextGalaxy } = await import('@/services/learningService');
+            // Check if next galaxy is already unlocked to prevent duplicate unlocks
+            const isNextGalaxyAlreadyUnlocked = nextGalaxy.unlocked === true;
             
-            // Unlock the next galaxy
-            const unlocked = await unlockNextGalaxy(walletAddress, currentGalaxy.id);
-            
-            if (unlocked) {
-              // Dispatch a galaxy unlocked event
-              const galaxyUnlockedEvent = new CustomEvent('galaxyUnlocked', {
-                detail: { 
-                  galaxyId: currentGalaxy.id,
-                  nextGalaxyId: currentGalaxy.id + 1
-                }
-              });
-              document.dispatchEvent(galaxyUnlockedEvent);
+            if (!isNextGalaxyAlreadyUnlocked) {
+              logger.log(`[ModulePage] All modules in galaxy ${currentGalaxy.id} completed, unlocking next galaxy`);
               
-              toast({
-                title: `🌌 New Galaxy Unlocked!`,
-                description: `You've unlocked the next galaxy in your learning journey!`,
-                duration: 5000,
-                variant: "default",
-                className: "galaxy-unlocked-toast",
-              });
+              // Import unlockNextGalaxy from learningService
+              const { unlockNextGalaxy } = await import('@/services/learningService');
+              
+              // Unlock the next galaxy
+              const unlocked = await unlockNextGalaxy(walletAddress, currentGalaxy.id);
+              
+              if (unlocked) {
+                // Set a session flag to prevent duplicate notifications
+                const galaxyUnlockKey = `galaxy_${currentGalaxy.id}_unlocked_${nextGalaxy.id}`;
+                if (!sessionStorage.getItem(galaxyUnlockKey)) {
+                  sessionStorage.setItem(galaxyUnlockKey, 'true');
+                  
+                  // Dispatch a galaxy unlocked event
+                  const galaxyUnlockedEvent = new CustomEvent('galaxyUnlocked', {
+                    detail: { 
+                      galaxyId: currentGalaxy.id,
+                      nextGalaxyId: currentGalaxy.id + 1
+                    }
+                  });
+                  document.dispatchEvent(galaxyUnlockedEvent);
+                  
+                  logger.log(`[ModulePage] Galaxy ${nextGalaxy.id} (${nextGalaxy.name}) unlocked`);
+                }
+              }
+      } else {
+              logger.log(`[ModulePage] Next galaxy ${nextGalaxy.id} already unlocked, skipping unlock process`);
             }
           }
         }
       } catch (galaxyError) {
-        console.error('[ModulePage] Error checking galaxy completion:', galaxyError);
+        logger.error('[ModulePage] Error checking galaxy completion:', galaxyError);
       }
       
       // Trigger a custom event for module completion to ensure the galaxy map updates
@@ -852,14 +873,19 @@ const ModulePage: React.FC = () => {
       
       // Ensure the event is processed before navigation
       setTimeout(() => {
-      // Navigate to next module (after a short delay if showing level up modal)
-      if (result.leveledUp) {
-        setTimeout(() => {
-          navigate(`/learning/${nextModuleId}`);
-        }, 3000);
-      } else {
-        navigate(`/learning/${nextModuleId}`);
-      }
+      // Don't automatically navigate to the next module - let the user do it from the Mission Complete modal
+      // This will fix the issue where modules auto-complete without user interaction
+      
+      // Instead of this:
+      // if (result.leveledUp) {
+      //   setTimeout(() => {
+      //     navigate(`/learning/${nextModuleId}`);
+      //   }, 3000);
+      // } else {
+      //   navigate(`/learning/${nextModuleId}`);
+      // }
+      
+      // Just show appropriate modals and let the user proceed manually
       }, 100);
     } catch (err) {
       toast({
@@ -883,9 +909,32 @@ const ModulePage: React.FC = () => {
           nextModuleId = 'smart-contracts-101';
         } else if (moduleId === 'smart-contracts-101') {
           nextModuleId = 'move-language';
+        } else if (moduleId === 'move-language') {
+          nextModuleId = 'objects-ownership';
+        } else if (moduleId === 'objects-ownership') {
+          nextModuleId = 'advanced-concepts';
+        } else if (moduleId === 'advanced-concepts') {
+          nextModuleId = 'nft-marketplace';
         } else {
-          const currentNum = parseInt(moduleId.replace('module-', ''), 10);
-          nextModuleId = `module-${currentNum + 1}`;
+          // Get current module ID and increment it
+          try {
+            // Try to parse an ID like module-2
+            const matches = moduleId?.match(/^([a-z-]+)-(\d+)$/);
+            if (matches && matches.length === 3) {
+              const prefix = matches[1];
+              const num = parseInt(matches[2], 10);
+              nextModuleId = `${prefix}-${num + 1}`;
+            } else {
+              // Default to returning to galaxy map if we can't determine next module
+              navigate('/learning');
+              return;
+            }
+          } catch (error) {
+            logger.error('[ModulePage] Error determining next module:', error);
+            // Default to returning to galaxy map on error
+            navigate('/learning');
+            return;
+          }
         }
         
         // Also update the main progress document to ensure completedModules array is updated
@@ -909,7 +958,7 @@ const ModulePage: React.FC = () => {
         // Navigate to next module anyway
         navigate(`/learning/${nextModuleId}`);
       } catch (recoveryError) {
-        console.error('[ModulePage] Recovery error:', recoveryError);
+        logger.error('[ModulePage] Recovery error:', recoveryError);
       }
     }
   };
@@ -1161,7 +1210,7 @@ const ModulePage: React.FC = () => {
         
       case 'alienChallenge':
         if (!moduleContent.alienChallenges || moduleContent.alienChallenges.length === 0) {
-          console.warn(`[ModulePage] No alien challenges found for module ${moduleId}, using fallback`);
+          logger.warn(`[ModulePage] No alien challenges found for module ${moduleId}, using fallback`);
           
           // If no alien challenges are available, create a fallback challenge
           const fallbackChallenge = {
@@ -1247,7 +1296,7 @@ const ModulePage: React.FC = () => {
                   <h3 className="text-xl font-bold mb-4">Module Summary</h3>
                   <div className="flex flex-wrap justify-center gap-6">
                     <div className="text-center">
-                      <div className="text-4xl font-bold text-primary mb-1">{totalXpEarned}</div>
+                      <div className="text-4xl font-bold text-primary mb-1">{totalXpEarned || XP_REWARDS.COMPLETE_MODULE}</div>
                       <div className="text-sm">XP Earned</div>
                     </div>
                     <div className="text-center">
@@ -1255,7 +1304,7 @@ const ModulePage: React.FC = () => {
                       <div className="text-sm text-muted-foreground">Cards Mastered</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-4xl font-bold text-accent mb-1">{quizScore}%</div>
+                      <div className="text-4xl font-bold text-accent mb-1">{quizScore || 0}%</div>
                       <div className="text-sm">Quiz Score</div>
                     </div>
                   </div>
@@ -1269,7 +1318,7 @@ const ModulePage: React.FC = () => {
                         <Star className="h-5 w-5 text-primary" />
                       </div>
                       <div className="text-left">
-                        <div className="text-sm font-medium">{totalXpEarned} XP</div>
+                        <div className="text-sm font-medium">{totalXpEarned || XP_REWARDS.COMPLETE_MODULE} XP</div>
                         <div className="text-xs text-foreground/70">Experience Points</div>
                       </div>
                     </div>
@@ -1316,35 +1365,13 @@ const ModulePage: React.FC = () => {
                   </div>
                 )}
                 
-                <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                  {nextModuleId ? (
-                    <Button 
-                      onClick={handleCompleteModule}
-                      className="neon-button"
-                      size="lg"
-                    >
-                      <Rocket className="mr-2 h-5 w-5" />
-                      Next Module
+                <div className="mt-6 text-center">
+                  <Button onClick={handleCompleteModule} className="w-full">
+                      Continue to Next Module
                     </Button>
-                  ) : (
-                    <Button 
-                      onClick={handleReturnToMap}
-                      className="neon-button"
-                      size="lg"
-                    >
-                      <Star className="mr-2 h-5 w-5" />
-                      Complete Galaxy
-                    </Button>
-                  )}
-                  
-                  <Button 
-                    onClick={handleReturnToMap}
-                    variant="outline"
-                    className="border-primary/50 text-primary"
-                    size="lg"
-                  >
-                    Return to Galaxy Map
-                  </Button>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Your progress has been saved
+                  </p>
                 </div>
               </div>
             </Card>
@@ -1458,64 +1485,72 @@ const ModulePage: React.FC = () => {
   
   // Mission completed modal component for Earth completion
   const MissionCompletedModal: React.FC = () => {
-    // Force unlock next galaxy if current galaxy is completed
-    useEffect(() => {
-      if (walletAddress && moduleId) {
-        // Set completion data based on actual module values
-        setCompletionData({
-          moduleId: moduleNumber || 1,
-          moduleName: moduleContent?.title || 'Module',
-          xpEarned: totalXpEarned > 0 ? totalXpEarned : (flashcardXpPool + 200),
-          suiEarned: 0.5,
-          quizScore: quizScore
-        });
+    // Use a ref to track if the effect has already run
+    const effectRan = useRef(false);
+    
+    // Initialize completionData directly with computed values instead of setting it in useEffect
+    const displayXp = totalXpEarned > 0 ? totalXpEarned : (flashcardXpPool + 200);
+    const displaySui = 0.5; // Default SUI reward
+    const displayModuleName = moduleContent?.title || 'Module';
+    const displayModuleId = moduleNumber || 1;
+    
+    // Use useCallback to memoize the function and prevent it from being recreated on every render
+    const checkAndUnlockNextGalaxy = useCallback(async () => {
+      if (!walletAddress || !moduleId) return;
+      
+      try {
+        const galaxiesData = await getGalaxiesWithModules(walletAddress);
         
-        // Check if we just completed a module and if all modules in current galaxy are now completed
-        const checkAndUnlockNextGalaxy = async () => {
-          try {
-            const galaxiesData = await getGalaxiesWithModules(walletAddress);
+        // Find which galaxy this module belongs to
+        const currentGalaxy = galaxiesData.find(g => g.modules.some(m => m.id === moduleId));
+        
+        if (currentGalaxy) {
+          // Check if all modules in this galaxy are completed (including the one we just completed)
+          const allGalaxyModulesCompleted = currentGalaxy.modules.every(m => 
+            m.completed || m.id === moduleId // Include current module as completed
+          );
+          
+          if (allGalaxyModulesCompleted) {
+            logger.log(`[ModulePage] All modules in galaxy ${currentGalaxy.id} completed, force unlocking next galaxy`);
             
-            // Find which galaxy this module belongs to
-            const currentGalaxy = galaxiesData.find(g => g.modules.some(m => m.id === moduleId));
-            
-            if (currentGalaxy) {
-              // Check if all modules in this galaxy are completed (including the one we just completed)
-              const allGalaxyModulesCompleted = currentGalaxy.modules.every(m => 
-                m.completed || m.id === moduleId // Include current module as completed
-              );
+            // Find the next galaxy
+            const nextGalaxyIndex = galaxiesData.findIndex(g => g.id === currentGalaxy.id) + 1;
+            if (nextGalaxyIndex < galaxiesData.length) {
+              const nextGalaxy = galaxiesData[nextGalaxyIndex];
               
-              if (allGalaxyModulesCompleted) {
-                console.log(`[ModulePage] All modules in galaxy ${currentGalaxy.id} completed, force unlocking next galaxy`);
+              // Check if next galaxy is already unlocked to prevent duplicate unlocks
+              const isNextGalaxyAlreadyUnlocked = nextGalaxy.unlocked === true;
+              
+              if (!isNextGalaxyAlreadyUnlocked) {
+                // Find the first module in the next galaxy
+                const firstModule = nextGalaxy.modules.length > 0 ? nextGalaxy.modules[0] : null;
+                if (!firstModule) {
+                  logger.warn(`[ModulePage] No modules found in galaxy ${nextGalaxy.id}`);
+                  return;
+                }
                 
-                // Find the next galaxy
-                const nextGalaxyIndex = galaxiesData.findIndex(g => g.id === currentGalaxy.id) + 1;
-                if (nextGalaxyIndex < galaxiesData.length) {
-                  const nextGalaxy = galaxiesData[nextGalaxyIndex];
-                  
-                  // Find the first module in the next galaxy
-                  const firstModule = nextGalaxy.modules.length > 0 ? nextGalaxy.modules[0] : null;
-                  if (!firstModule) {
-                    console.warn(`[ModulePage] No modules found in galaxy ${nextGalaxy.id}`);
-                    return;
-                  }
-                  
-                  // Calculate the new rocket position
-                  const newRocketPosition = {
-                    x: nextGalaxy.position.x + firstModule.position.x,
-                    y: nextGalaxy.position.y + firstModule.position.y
-                  };
-                  
-                  // Force unlock next galaxy in Firestore
-                  const db = getFirestore();
-                  const userProgressRef = doc(db, 'learningProgress', walletAddress);
-                  
-                  await updateDoc(userProgressRef, {
-                    unlockedGalaxies: arrayUnion(nextGalaxy.id),
-                    currentGalaxyId: nextGalaxy.id,
-                    currentModuleId: firstModule.id,
-                    rocketPosition: newRocketPosition,
-                    lastActivityTimestamp: serverTimestamp()
-                  });
+                // Calculate the new rocket position
+                const newRocketPosition = {
+                  x: nextGalaxy.position.x + firstModule.position.x,
+                  y: nextGalaxy.position.y + firstModule.position.y
+                };
+                
+                // Force unlock next galaxy in Firestore
+                const db = getFirestore();
+                const userProgressRef = doc(db, 'learningProgress', walletAddress);
+                
+                await updateDoc(userProgressRef, {
+                  unlockedGalaxies: arrayUnion(nextGalaxy.id),
+                  currentGalaxyId: nextGalaxy.id,
+                  currentModuleId: firstModule.id,
+                  rocketPosition: newRocketPosition,
+                  lastActivityTimestamp: serverTimestamp()
+                });
+                
+                // Set a session flag to prevent duplicate notifications
+                const galaxyUnlockKey = `galaxy_${currentGalaxy.id}_unlocked_${nextGalaxy.id}`;
+                if (!sessionStorage.getItem(galaxyUnlockKey)) {
+                  sessionStorage.setItem(galaxyUnlockKey, 'true');
                   
                   // Create and dispatch a galaxy unlocked event
                   const galaxyUnlockedEvent = new CustomEvent('galaxyUnlocked', {
@@ -1536,82 +1571,90 @@ const ModulePage: React.FC = () => {
                     className: "galaxy-unlocked-toast",
                   });
                 }
+              } else {
+                logger.log(`[ModulePage] Next galaxy ${nextGalaxy.id} already unlocked, skipping unlock process`);
               }
             }
-          } catch (error) {
-            console.error('[ModulePage] Error in force unlock:', error);
           }
-        };
-        
-        checkAndUnlockNextGalaxy();
+        }
+      } catch (error) {
+        logger.error('[ModulePage] Error in force unlock:', error);
       }
-    }, [walletAddress, moduleId, toast, moduleContent, moduleNumber, totalXpEarned, flashcardXpPool, quizScore]);
+    }, [walletAddress, moduleId, toast]);
     
-    // Close the modal and return to the galaxy map
+    // Fixed useEffect to run only once
+    useEffect(() => {
+      // Skip if the effect has already run or if required data is missing
+      if (effectRan.current || !walletAddress || !moduleId) return;
+      
+      // Update completion data in the parent component to make it available for other uses
+      setCompletionData({
+        moduleId: displayModuleId,
+        moduleName: displayModuleName,
+        xpEarned: displayXp,
+        suiEarned: displaySui,
+        quizScore: quizScore
+      });
+      
+      // Run the galaxy unlock check
+      checkAndUnlockNextGalaxy();
+      
+      // Mark that this effect has run
+      effectRan.current = true;
+      
+      // Cleanup function
+      return () => {
+        // Reset the ref when component unmounts
+        effectRan.current = false;
+      };
+    }, [walletAddress, moduleId, checkAndUnlockNextGalaxy, displayModuleId, displayModuleName, displayXp, displaySui, quizScore]);
+    
+    // Close the modal and navigate to next module
     const handleContinue = async () => {
       setShowMissionCompletedModal(false);
       
-      // If we just completed a module and this might be the last module in a galaxy,
-      // dispatch a galaxy unlocked event to trigger updates in the Learning page
-      if (moduleId && walletAddress) {
+      // Find the next module ID
+      let nextModuleId = '';
+      if (moduleId === 'intro-to-sui') {
+        nextModuleId = 'smart-contracts-101';
+      } else if (moduleId === 'smart-contracts-101') {
+        nextModuleId = 'move-language';
+      } else if (moduleId === 'move-language') {
+        nextModuleId = 'objects-ownership';
+      } else if (moduleId === 'objects-ownership') {
+        nextModuleId = 'advanced-concepts';
+      } else if (moduleId === 'advanced-concepts') {
+        nextModuleId = 'nft-marketplace';
+      } else {
+        // Get current module ID and increment it
         try {
-          const galaxiesData = await getGalaxiesWithModules(walletAddress);
-          
-          // Find which galaxy this module belongs to
-          const currentGalaxy = galaxiesData.find(g => g.modules.some(m => m.id === moduleId));
-          
-          if (currentGalaxy) {
-            // For the galaxy completion check, we need to consider the current module as completed
-            // as well as checking all other modules in the galaxy
-            const allModulesInGalaxyCompleted = currentGalaxy.modules.every(m => 
-              m.id === moduleId || // This is the current module we just completed
-              m.completed ||      // This module was already marked as completed
-              isModuleCompleted(walletAddress, m.id) // Check completion status through the API
-            );
-            
-            console.log(`[ModulePage] Galaxy completion check:`, {
-              galaxyId: currentGalaxy.id,
-              moduleId,
-              allModulesInGalaxyCompleted
-            });
-            
-            if (allModulesInGalaxyCompleted) {
-              // This was the last module in the galaxy, attempt to unlock next galaxy
-              console.log(`[ModulePage] MissionCompletedModal: All modules in galaxy ${currentGalaxy.id} completed`);
-              
-              // Import and call unlockNextGalaxy function
-              const { unlockNextGalaxy } = await import('@/services/learningService');
-              const unlocked = await unlockNextGalaxy(walletAddress, currentGalaxy.id);
-              
-              if (unlocked) {
-                // Dispatch galaxy unlocked event
-                const galaxyUnlockedEvent = new CustomEvent('galaxyUnlocked', {
-                  detail: { 
-                    galaxyId: currentGalaxy.id,
-                    nextGalaxyId: currentGalaxy.id + 1
-                  }
-                });
-                document.dispatchEvent(galaxyUnlockedEvent);
-                
-                console.log(`[ModulePage] MissionCompletedModal: Successfully unlocked next galaxy`);
-                
-                toast({
-                  title: `🌌 New Galaxy Unlocked!`,
-                  description: `You've unlocked the next galaxy in your learning journey!`,
-                  duration: 5000,
-                  variant: "default",
-                  className: "galaxy-unlocked-toast",
-                });
-              }
-            }
+          // Try to parse an ID like module-2
+          const matches = moduleId?.match(/^([a-z-]+)-(\d+)$/);
+          if (matches && matches.length === 3) {
+            const prefix = matches[1];
+            const num = parseInt(matches[2], 10);
+            nextModuleId = `${prefix}-${num + 1}`;
+          } else {
+            // Default to returning to galaxy map if we can't determine next module
+            navigate('/learning');
+            return;
           }
         } catch (error) {
-          console.error('[ModulePage] Error checking galaxy completion in MissionCompletedModal:', error);
+          logger.error('[ModulePage] Error determining next module:', error);
+          // Default to returning to galaxy map on error
+          navigate('/learning');
+          return;
         }
       }
       
-      // Navigate back to the learning page
-      navigate('/learning');
+      // If we found a next module, navigate to it
+      if (nextModuleId) {
+        logger.log(`[ModulePage] Navigating to next module: ${nextModuleId}`);
+        navigate(`/learning/${nextModuleId}`);
+      } else {
+        // Fallback to galaxy map
+        navigate('/learning');
+      }
     };
     
     // Format XP numbers with commas
@@ -1620,13 +1663,6 @@ const ModulePage: React.FC = () => {
     };
     
     if (!showMissionCompletedModal) return null;
-    
-    // Ensure we have a non-zero XP value by using a fallback if totalXpEarned is 0
-    // Default to 200 XP for module completion as defined in learningService.ts
-    const displayXp = completionData.xpEarned || totalXpEarned || 200; 
-    const displaySui = completionData.suiEarned || 0.5;
-    const displayModuleName = completionData.moduleName || (moduleContent?.title || 'Module');
-    const displayModuleId = completionData.moduleId || (moduleNumber || 1);
     
     return (
       <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
@@ -1643,7 +1679,7 @@ const ModulePage: React.FC = () => {
             
             <h2 className="text-2xl font-bold mb-2">Mission Completed!</h2>
             <p className="text-foreground/80 mb-6">You've successfully completed {displayModuleName} and earned rewards.</p>
-            
+                
             <div className="bg-background/50 rounded-lg p-4 mb-6">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-foreground/70">XP Earned</span>
@@ -1657,45 +1693,17 @@ const ModulePage: React.FC = () => {
           
               <div className="flex justify-between items-center">
                 <span className="text-foreground/70">Module NFT</span>
-                <span className="font-semibold text-primary">
-                  <ModuleCompletionPopup 
-                    isOpen={showMissionCompletedModal}
-                    onClose={() => setShowMissionCompletedModal(false)}
-                    moduleId={displayModuleId}
-                    moduleName={displayModuleName}
-                    walletAddress={walletAddress || ''}
-                    xpEarned={displayXp}
-                    suiEarned={displaySui}
-                    quizScore={completionData.quizScore}
-                  />
-                  Minting in Progress...
-                </span>
+                <span className="font-semibold text-primary">Claimed</span>
             </div>
             </div>
           
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              {nextModuleId ? (
           <Button 
-                  onClick={() => {
-                    setShowMissionCompletedModal(false);
-                    handleCompleteModule();
-                  }} 
-                  className="neon-button"
-                >
-                  <Rocket className="mr-2 h-5 w-5" />
-                  Next Module
+              className="w-full" 
+              onClick={handleContinue}
+              size="lg"
+          >
+              Continue to Next Module
           </Button>
-              ) : null}
-              
-              <Button 
-                onClick={handleContinue} 
-                className={nextModuleId ? "border-primary/50 text-primary" : "neon-button w-full"}
-                variant={nextModuleId ? "outline" : "default"}
-              >
-                <Star className="mr-2 h-5 w-5" />
-                Back to Galaxy Map
-              </Button>
-            </div>
           </div>
         </motion.div>
       </div>
@@ -1870,11 +1878,11 @@ const ModulePage: React.FC = () => {
                     moduleNumId = 3;
                   } else if (moduleId === 'objects-ownership') {
                     moduleNumId = 4;
-                  } else {
+                } else {
                     const match = moduleId.match(/\d+/);
                     if (match) {
                       moduleNumId = parseInt(match[0], 10);
-                    }
+                }
                   }
                   
                   // Use actual accumulated XP and quiz score if available
@@ -1950,14 +1958,14 @@ const ModulePage: React.FC = () => {
                   
                   if (result.success) {
                     if (result.transaction) {
-                      toast({
+                  toast({
                         title: "NFT Transaction Created",
                         description: "Transaction created successfully. Ready for wallet signature.",
-                        duration: 3000,
-                      });
+                    duration: 3000,
+                  });
                       
                       // Display transaction details to console for debugging
-                      console.log('[Test NFT Mint] Transaction created:', result.transaction);
+                      logger.log('[Test NFT Mint] Transaction created:', result.transaction);
                       
                       // Now open the completion modal to handle the actual minting process
                       const actualXpEarned = totalXpEarned > 0 ? totalXpEarned : (flashcardXpPool + 200);
@@ -1988,7 +1996,7 @@ const ModulePage: React.FC = () => {
                     });
                   }
                 } catch (err) {
-                  console.error('[Test NFT Mint] Error:', err);
+                  logger.error('[Test NFT Mint] Error:', err);
                   toast({
                     title: "Error",
                     description: "Failed to create NFT mint transaction",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Award, X, Loader2, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -60,34 +60,9 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
     ? Math.min(quizScore, 100) 
     : quizScore || 0;
 
-  // Trigger confetti when popup opens
-  useEffect(() => {
-    if (isOpen) {
-      // Trigger confetti
-      confetti({
-        particleCount: 200,
-        spread: 90,
-        origin: { x: 0.5, y: 0.3 }
-      });
-      
-      // Start NFT minting when popup opens if user has a wallet connected
-      console.log(`[NFT] Popup opened for module ${moduleId}, wallet address: ${activeWalletAddress}`);
-      
-      // Reset state on each open
-      setMintingSuccess(false);
-      setMintingError(null);
-      
-      // Delay slightly to ensure popup is fully rendered
-      setTimeout(() => {
-        console.log(`[NFT] Starting mint process for module ${moduleId}`);
-        setIsMinting(true);
-        mintNFT();
-      }, 500);
-    }
-  }, [isOpen, moduleId, activeWalletAddress]);
-
-  // Handle NFT minting
-  const mintNFT = async () => {
+  // Move mintNFT before the useEffect that uses it
+  // Define mintNFT with useCallback to avoid dependency issues
+  const mintNFT = useCallback(async () => {
     try {
       setMintingError(null);
 
@@ -152,11 +127,14 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
           setMintingSuccess(true);
           setTxDigest(txDigest);
           
-          // Trigger confetti for successful minting
+          // Trigger lighter confetti for successful minting
           confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { x: 0.5, y: 0.5 }
+            particleCount: 50,
+            spread: 60,
+            origin: { x: 0.5, y: 0.5 },
+            gravity: 1.2,
+            scalar: 0.7,
+            disableForReducedMotion: true
           });
         } catch (walletError) {
           console.error(`[NFT] Wallet error during transaction:`, walletError);
@@ -182,7 +160,66 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
     } finally {
       setIsMinting(false);
     }
-  };
+  }, [activeWalletAddress, isWalletConnected, moduleId, signAndExecuteTransaction]);
+
+  // Trigger confetti when popup opens
+  useEffect(() => {
+    if (isOpen) {
+      // Removed the session storage check so popup will show every time it's needed
+      
+      // Trigger lighter confetti
+      confetti({
+        particleCount: 80,
+        spread: 50,
+        origin: { x: 0.5, y: 0.3 },
+        gravity: 1.2, // Make particles fall faster
+        scalar: 0.8, // Make particles smaller
+        disableForReducedMotion: true // Disable for reduced motion settings
+      });
+      
+      // Start NFT minting when popup opens if user has a wallet connected
+      console.log(`[NFT] Popup opened for module ${moduleId}, wallet address: ${activeWalletAddress}`);
+      
+      // Reset state on each open
+      setMintingSuccess(false);
+      setMintingError(null);
+      
+      // First check if user already has this NFT before starting the mint
+      const checkExistingNFT = async () => {
+        try {
+          const { hasModuleNFT } = await import('@/services/nftService');
+          const hasNFT = await hasModuleNFT(activeWalletAddress, moduleId);
+          
+          if (hasNFT) {
+            console.log(`[NFT] User already has NFT for module ${moduleId}, skipping mint`);
+            setMintingSuccess(true);
+            setMintingError("You already own this NFT. Check your inventory.");
+            setIsMinting(false);
+            return;
+          }
+          
+          // Only start minting if user doesn't already have the NFT
+          setIsMinting(true);
+          mintNFT();
+        } catch (error) {
+          console.error(`[NFT] Error checking for existing NFT:`, error);
+          // Proceed with mint if check fails
+          setIsMinting(true);
+          mintNFT();
+        }
+      };
+      
+      // Delay slightly to ensure popup is fully rendered
+      const timer = setTimeout(() => {
+        checkExistingNFT();
+      }, 500);
+      
+      // Clean up timeout to prevent memory leaks
+      return () => {
+        clearTimeout(timer);
+      };
+    }
+  }, [isOpen, moduleId, activeWalletAddress, mintNFT, isWalletConnected]);
 
   // Show NFT details on Sui Explorer
   const viewOnExplorer = () => {
@@ -205,8 +242,6 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
   useEffect(() => {
     const win = window as any;
     win.showDirectModuleCompletionPopup = (data: any) => {
-      
-      
       // Extract data or use defaults
       const popupData = {
         moduleId: data.moduleId || 1,
@@ -217,21 +252,32 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
         quizScore: data.quizScore || 0
       };
       
-      // Force the popup to open by updating state
+      console.log(`[NFT] Direct popup called for module ${popupData.moduleId}`);
+      
+      // Reset all states at once with a single batch update
+      // to prevent flickering from multiple sequential state updates
       setIsMinting(false);
       setMintingSuccess(false);
       setMintingError(null);
+      setNftId(null);
+      setTxDigest(null);
       
-      // Use setTimeout to ensure this runs after current execution cycle
+      // Use a slightly longer delay to ensure the state has properly updated
+      // before attempting to mint, preventing race conditions
       setTimeout(() => {
-        mintNFT();
-      }, 300);
+        // Check if component is still mounted before proceeding
+        if (win.showDirectModuleCompletionPopup) {
+          console.log(`[NFT] Starting mint process after delay`);
+          setIsMinting(true);
+          mintNFT();
+        }
+      }, 500);
     };
     
     return () => {
       delete (window as any).showDirectModuleCompletionPopup;
     };
-  }, []);
+  }, [mintNFT]); // Add mintNFT to the dependency array
 
   if (!isOpen) return null;
 
@@ -348,7 +394,12 @@ const ModuleCompletionPopup: React.FC<ModuleCompletionPopupProps> = ({
         </div>
         
         <div className="mt-6 text-center">
-          <Button onClick={onClose} className="w-full">
+          <Button onClick={() => {
+            // First set minting success to true to prevent auto-restart
+            setMintingSuccess(true);
+            // Then close the popup
+            onClose();
+          }} className="w-full">
             Continue
           </Button>
           <p className="mt-2 text-xs text-muted-foreground">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import NavBar from '@/components/NavBar';
@@ -39,6 +39,7 @@ import { sendSuiReward } from '@/services/suiPaymentService';
 import { rewardUser } from '@/services/userRewardsService';
 import './learning.css';
 import { Progress } from "@/components/ui/progress";
+import logger from '@/utils/logger';
 
 // Define interfaces that match the ones in LearningPathMap
 interface Module {
@@ -137,6 +138,35 @@ const Learning = () => {
   // Map interaction state
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   
+  // Sort galaxies to show completed ones at the end
+  const sortGalaxiesByCompletion = useCallback((galaxiesToSort: GalaxyType[]): GalaxyType[] => {
+    // First, separate current galaxy, completed galaxies, and incomplete galaxies
+    const currentGalaxyObj = galaxiesToSort.find(g => g.current);
+    const completedGalaxies = galaxiesToSort.filter(g => g.completed && !g.current);
+    const incompleteGalaxies = galaxiesToSort.filter(g => !g.completed && !g.current);
+    
+    // Sort each group by ID to maintain order
+    const sortById = (a: GalaxyType, b: GalaxyType) => a.id - b.id;
+    completedGalaxies.sort(sortById);
+    incompleteGalaxies.sort(sortById);
+    
+    // Combine the arrays: current galaxy first, then incomplete, then completed
+    const result: GalaxyType[] = [];
+    
+    // Add current galaxy if it exists
+    if (currentGalaxyObj) {
+      result.push(currentGalaxyObj);
+    }
+    
+    // Add incomplete galaxies
+    result.push(...incompleteGalaxies);
+    
+    // Add completed galaxies at the end
+    result.push(...completedGalaxies);
+    
+    return result;
+  }, []);
+  
   // Update connection status when wallet changes
   useEffect(() => {
     setConnected(!!currentAccount);
@@ -170,7 +200,7 @@ const Learning = () => {
             // Process modules to ensure correct locked/unlocked status
             const processedModules = galaxy.modules.map((module, moduleIndex) => {
               let isModuleLocked = module.locked;
-              let isModuleCurrent = module.current;
+              let isModuleCurrent = module.current || module.id === currentModuleId;
               
               // First module in first galaxy is always unlocked
               if (index === 0 && moduleIndex === 0) {
@@ -188,9 +218,19 @@ const Learning = () => {
                 isModuleLocked = !previousModule.completed && module.locked;
               }
               
+              // IMPORTANT FIX: If this is the current module, it should NEVER be locked
+              if (isModuleCurrent || module.id === currentModuleId) {
+                isModuleLocked = false;
+              }
+              
+              // Also ensure module is unlocked if it's already completed
+              if (completedModules && completedModules.includes(module.id)) {
+                isModuleLocked = false;
+              }
+              
               return {
-                ...module,
-                type: module.type as 'planet' | 'moon' | 'asteroid' | 'station' | 'earth',
+              ...module,
+            type: module.type as 'planet' | 'moon' | 'asteroid' | 'station' | 'earth',
                 locked: isModuleLocked,
                 current: isModuleCurrent
               };
@@ -198,7 +238,7 @@ const Learning = () => {
             
             return {
               ...galaxy,
-              position: { x: baseX, y: baseY },
+            position: { x: baseX, y: baseY },
               modules: processedModules
             } as GalaxyType;
           });
@@ -206,54 +246,163 @@ const Learning = () => {
           // Set the galaxies data
           setGalaxies(formattedGalaxies);
           
-        // Only process progress data if wallet is connected
+          // If user is logged in, get their specific progress
         if (walletAddress) {
-          
-          
-          // Get user progress to get the correct rocket position
-          const userProgress = await getUserLearningProgress(walletAddress);
-          
-          // Find the current galaxy
-          const current = formattedGalaxies.find(g => g.current);
-          if (current) {
-            setCurrentGalaxy(current.id);
+            // Get user progress document
+            const userProgressRef = doc(db, 'learningProgress', walletAddress);
+            const userProgressDoc = await getDoc(userProgressRef);
             
-            // Find the current module
-            const currentModule = current.modules.find((m: ModuleType) => m.current);
-            if (currentModule) {
+            if (userProgressDoc.exists()) {
+              const userData = userProgressDoc.data();
               
-              setCurrentModuleId(currentModule.id);
+              logger.log('[Learning] User progress data:', userData);
+            
+              // Get current module and galaxy
+              const currentMod = userData.currentModuleId || 'intro-to-sui';
+              const currentGal = userData.currentGalaxy || 1;
+              const rocketPos = userData.rocketPosition || { x: 300, y: 150 };
               
-              // Set rocket position - prioritize the one from userProgress if available
-              if (userProgress && userProgress.rocketPosition) {
+              // Set state with user progress
+              setCurrentModuleId(currentMod);
+              setCurrentGalaxy(currentGal);
+              setRocketPosition(rocketPos);
+              
+              logger.log('[Learning] Setting rocket position to:', rocketPos);
+              
+              // Update galaxy and module unlock status based on user data
+              ensureGalaxiesUnlocked(formattedGalaxies, userData);
+              
+              // Set completed modules from user progress
+              const completedModules = userData.completedModules || [];
+              setCompletedModules(completedModules);
+              
+              logger.log('[Learning] Completed modules:', completedModules);
+              
+              // Check if current module is already completed
+              const isCurrentModuleCompleted = completedModules.includes(currentMod);
+              logger.log(`[Learning] Current module ${currentMod} completed status: ${isCurrentModuleCompleted}`);
+              
+              // If the current module is already completed, we might need to advance to the next one
+              if (isCurrentModuleCompleted) {
+                logger.log(`[Learning] Current module ${currentMod} is completed, checking if we need to update...`);
                 
-                setRocketPosition(userProgress.rocketPosition);
+                // Get fresh galaxy data to find the next module
+                const galaxiesWithModules = await getGalaxiesWithModules(walletAddress);
+                
+                // Find which galaxy this module belongs to
+                let moduleGalaxy = null;
+                let moduleIndex = -1;
+                
+                for (const galaxy of galaxiesWithModules) {
+                  const foundModuleIndex = galaxy.modules.findIndex(m => m.id === currentMod);
+                  if (foundModuleIndex !== -1) {
+                    moduleGalaxy = galaxy;
+                    moduleIndex = foundModuleIndex;
+                    break;
+                  }
+                }
+                
+                if (moduleGalaxy && moduleIndex !== -1) {
+                  logger.log(`[Learning] Found module ${currentMod} in galaxy ${moduleGalaxy.id} at index ${moduleIndex}`);
+                  
+                  // If there's a next module in the same galaxy, set it as current
+                  if (moduleIndex < moduleGalaxy.modules.length - 1) {
+                    const nextModule = moduleGalaxy.modules[moduleIndex + 1];
+                    logger.log(`[Learning] Next module in same galaxy: ${nextModule.id}`);
+                    
+                    // Don't update if already set to the next module
+                    if (nextModule.id !== currentMod) {
+                      // Important: Mark the next module as explicitly unlocked regardless of its current status
+                      logger.log(`[Learning] Setting current module to: ${nextModule.id} and explicitly unlocking it`);
+                      setCurrentModuleId(nextModule.id);
+                      
+                      // Update in Firebase to persist this change - important to set locked=false
+                      try {
+                        await updateDoc(userProgressRef, {
+                          currentModuleId: nextModule.id,
+                          lastActivityTimestamp: serverTimestamp()
+                        });
+                        logger.log(`[Learning] Updated currentModuleId in Firestore to ${nextModule.id}`);
+                        
+                        // Explicitly unlock the next module in the moduleProgress subcollection
+                        const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), nextModule.id);
+                        const moduleProgressDoc = await getDoc(moduleProgressRef);
+                        
+                        if (moduleProgressDoc.exists()) {
+                          // Update existing module progress doc to unlocked
+                          await updateDoc(moduleProgressRef, {
+                            locked: false,
+                            lastAccessed: serverTimestamp()
+                          });
+                          logger.log(`[Learning] Explicitly unlocked module ${nextModule.id} in moduleProgress collection`);
               } else {
-                const rocketX = current.position.x + (currentModule.position?.x || 0);
-                const rocketY = current.position.y + (currentModule.position?.y || 0);
-                setRocketPosition({ x: rocketX, y: rocketY });
+                          // Create new module progress doc with unlocked status
+                          await setDoc(moduleProgressRef, {
+                            moduleId: nextModule.id,
+                            completed: false,
+                            locked: false,
+                            completedLessons: [],
+                            lastAccessed: serverTimestamp()
+                          });
+                          logger.log(`[Learning] Created new unlocked module progress for ${nextModule.id}`);
+                        }
+                      } catch (error) {
+                        logger.error('[Learning] Error updating currentModuleId and unlocking next module:', error);
+                      }
+                    }
+                  }
+                }
               }
-            }
-          }
           
-          // Set completed modules from user progress
-          if (userProgress && userProgress.completedModules) {
-            setCompletedModules(userProgress.completedModules || []);
-          }
-          
-          // Calculate overall progress statistics
-          const totalModules = formattedGalaxies.reduce((total, galaxy) => total + galaxy.modules.length, 0);
-          const completedModules = formattedGalaxies.reduce((total, galaxy) => 
-            total + galaxy.modules.filter((m: ModuleType) => m.completed).length, 0);
-          const overallPercentage = Math.floor((completedModules / totalModules) * 100);
+              // Calculate overall progress
+              const totalModules = formattedGalaxies.reduce((total, g) => total + g.modules.length, 0);
+              const totalModulesCompleted = completedModules.length;
+              const overallProgress = totalModules > 0 ? Math.floor((totalModulesCompleted / totalModules) * 100) : 0;
           
           setUserProgress({
-            overallProgress: overallPercentage,
-            totalModulesCompleted: completedModules,
+                overallProgress,
+                totalModulesCompleted,
             totalModules
           });
+              
+              logger.log('[Learning] Progress calculated:', {
+                overallProgress,
+                totalModulesCompleted,
+                totalModules
+              });
+              
+              // Update user level and XP progress
+              if (userData.xp) {
+                const userXp = userData.xp || 0;
+                const userLevel = calculateLevel(userXp);
+                setUserLevel(userLevel);
+                
+                // Calculate next level XP requirement
+                const nextLevelXp = calculateXpForNextLevel(userLevel);
+                setNextLevelXp(nextLevelXp);
+                
+                // Calculate XP progress percentage
+                const currentLevelXp = calculateXpForLevel(userLevel);
+                const xpProgress = ((userXp - currentLevelXp) / (nextLevelXp - currentLevelXp)) * 100;
+                setLevelProgress(Math.min(100, Math.max(0, xpProgress)));
+              }
+            } else {
+              logger.log('[Learning] No user progress document found, using default values');
+              
+              // Set default values for new users
+              setUserProgress({
+                overallProgress: 0,
+                totalModulesCompleted: 0,
+                totalModules: formattedGalaxies.reduce((total, g) => total + g.modules.length, 0)
+              });
+              setCurrentGalaxy(1); // First galaxy
+              setCurrentModuleId('intro-to-sui'); // First module
+              setRocketPosition({ x: 300, y: 150 }); // Default position
+            }
         } else {
           // Set default values for unconnected state
+            logger.log('[Learning] No wallet address, using default values');
+            
           setUserProgress({
             overallProgress: 0,
             totalModulesCompleted: 0,
@@ -266,6 +415,7 @@ const Learning = () => {
           setRocketPosition({ x: 300, y: 150 }); // Default position
         }
         } catch (error) {
+          logger.error('[Learning] Error fetching user progress:', error);
         
         toast({
           title: "Error",
@@ -279,6 +429,89 @@ const Learning = () => {
     
     fetchUserProgress();
   }, [walletAddress, toast]);
+  
+  // Ensure galaxies are properly unlocked based on user progress data
+  const ensureGalaxiesUnlocked = (galaxies: GalaxyType[], userData: any) => {
+    if (!userData) return galaxies;
+    
+    // Get the array of completed modules
+    const completedModules = userData.completedModules || [];
+    
+    // Get explicitly unlocked galaxies from user data
+    const unlockedGalaxies = userData.unlockedGalaxies || [];
+    const currentGalaxyId = userData.currentGalaxy || 1;
+    const currentModuleId = userData.currentModuleId || 'intro-to-sui';
+    
+    const updatedGalaxies = [...galaxies];
+    
+    // Process each galaxy to determine if it should be unlocked
+    for (let i = 0; i < updatedGalaxies.length; i++) {
+      const galaxy = updatedGalaxies[i];
+      
+      // Galaxy 1 is always unlocked
+      if (galaxy.id === 1) {
+        galaxy.unlocked = true;
+      }
+      
+      // Check if this galaxy is explicitly unlocked in user data
+      else if (unlockedGalaxies.includes(galaxy.id)) {
+        galaxy.unlocked = true;
+      }
+      
+      // Check if the previous galaxy exists and is completed
+      else if (i > 0) {
+        const previousGalaxy = updatedGalaxies[i-1];
+        
+        // A galaxy is completed only when ALL its modules are completed
+        const isPreviousGalaxyCompleted = previousGalaxy.modules.every(module => 
+          completedModules.includes(module.id)
+        );
+        
+        // Only unlock this galaxy if the previous one is fully completed
+        if (isPreviousGalaxyCompleted) {
+          logger.log(`[Learning] Galaxy ${previousGalaxy.id} is completed, ensuring Galaxy ${galaxy.id} is unlocked`);
+          galaxy.unlocked = true;
+        }
+      }
+      
+      // Set current flag based on currentGalaxyId
+      galaxy.current = galaxy.id === currentGalaxyId;
+      
+      // Process modules within the galaxy
+      for (let j = 0; j < galaxy.modules.length; j++) {
+        const module = galaxy.modules[j];
+        
+        // Mark as completed if in the completedModules array
+        module.completed = completedModules.includes(module.id);
+        
+        // First module in a galaxy is unlocked if the galaxy is unlocked
+        if (j === 0) {
+          module.locked = !galaxy.unlocked;
+        }
+        // For subsequent modules, they're unlocked if the previous module is completed
+        else if (j > 0) {
+          const previousModule = galaxy.modules[j-1];
+          module.locked = !previousModule.completed;
+        }
+        
+        // If this is the current module, make sure it's not locked
+        if (module.id === currentModuleId) {
+          module.locked = false;
+          module.current = true;
+        } else {
+          module.current = false;
+        }
+        
+        // Completed modules are never locked
+        if (module.completed) {
+          module.locked = false;
+        }
+      }
+    }
+    
+    setGalaxies(updatedGalaxies);
+    return updatedGalaxies;
+  };
   
   // Fetch daily challenges for the user
   useEffect(() => {
@@ -400,9 +633,9 @@ const Learning = () => {
             updateDoc(userProgressRef, {
               currentModuleId: moduleId,
               lastActivityTimestamp: serverTimestamp()
-            }).catch(err => console.error('[Learning] Error updating current module:', err));
+            }).catch(err => logger.error('[Learning] Error updating current module:', err));
           } catch (error) {
-            console.error('[Learning] Error updating current module:', error);
+            logger.error('[Learning] Error updating current module:', error);
           }
         }
         
@@ -459,6 +692,12 @@ const Learning = () => {
   // Find the current galaxy and module
   const currentGalaxyData = galaxies.find(galaxy => galaxy.id === currentGalaxy);
   const currentModuleData = currentGalaxyData?.modules.find((m: ModuleType) => m.id === currentModuleId);
+  
+  // Sort galaxies for display - current galaxy first, then incomplete, then completed
+  const sortedGalaxies = useMemo(() => sortGalaxiesByCompletion(galaxies), [galaxies, sortGalaxiesByCompletion]);
+  
+  // Get the current galaxy for displaying available modules
+  const currentGalaxyForModules = sortedGalaxies.find(g => g.current);
   
   // User stats
   const userStats = {
@@ -561,6 +800,52 @@ const Learning = () => {
         totalXpEarned: increment(module.xpReward),
         lastActivityTimestamp: serverTimestamp()
       });
+      
+      // Find the next module in sequence
+      let nextModuleId = null;
+      let nextModule = null;
+      
+      // First look in the same galaxy
+      const currentGalaxyData = galaxies.find(g => g.id === currentGalaxy);
+      if (currentGalaxyData) {
+        const moduleIndex = currentGalaxyData.modules.findIndex(m => m.id === moduleId);
+        if (moduleIndex !== -1 && moduleIndex < currentGalaxyData.modules.length - 1) {
+          nextModule = currentGalaxyData.modules[moduleIndex + 1];
+          nextModuleId = nextModule.id;
+          
+          logger.log(`[Learning] Found next module ${nextModuleId} in same galaxy`);
+          
+          // Explicitly unlock the next module
+          const moduleProgressRef = doc(collection(userRef, 'moduleProgress'), nextModuleId);
+          const moduleProgressDoc = await getDoc(moduleProgressRef);
+          
+          if (moduleProgressDoc.exists()) {
+            // Update existing module progress doc to unlocked
+            await updateDoc(moduleProgressRef, {
+              locked: false,
+              lastAccessed: serverTimestamp()
+            });
+            logger.log(`[Learning] Explicitly unlocked next module ${nextModuleId} in moduleProgress collection`);
+          } else {
+            // Create new module progress doc with unlocked status
+            await setDoc(moduleProgressRef, {
+              moduleId: nextModuleId,
+              completed: false,
+              locked: false,
+              completedLessons: [],
+              lastAccessed: serverTimestamp()
+            });
+            logger.log(`[Learning] Created new unlocked module progress for ${nextModuleId}`);
+          }
+          
+          // Update the current module ID
+          await updateDoc(userRef, {
+            currentModuleId: nextModuleId,
+            lastActivityTimestamp: serverTimestamp()
+          });
+          logger.log(`[Learning] Updated currentModuleId to next module: ${nextModuleId}`);
+        }
+      }
       
       // Award SUI tokens if the module includes a token reward
       if (module.tokenReward && module.tokenReward > 0) {
@@ -710,6 +995,20 @@ const Learning = () => {
       // Get all galaxies with modules
       const galaxiesData = await getGalaxiesWithModules(walletAddress);
       
+      // Log completion status for all modules across all galaxies
+      logger.log('[Learning] Checking completion status for all modules across all galaxies:');
+      galaxiesData.forEach(galaxy => {
+        logger.log(`[Learning] Galaxy ${galaxy.id} (${galaxy.name}) - ${galaxy.modules.length} modules:`);
+        galaxy.modules.forEach(module => {
+          const isModuleCompleted = completedModulesList.includes(module.id);
+          logger.log(`[Learning] - Module ${module.id} (${module.title}): completed=${isModuleCompleted}, locked=${module.locked}`);
+        });
+        
+        // Check if all modules in this galaxy are completed
+        const allModulesInGalaxyCompleted = galaxy.modules.every(m => completedModulesList.includes(m.id));
+        logger.log(`[Learning] Galaxy ${galaxy.id} (${galaxy.name}): all modules completed=${allModulesInGalaxyCompleted}`);
+      });
+
       // Process galaxy data to determine current galaxy and module
       let currentGalaxyId = 1;
       let foundCurrentModule = false;
@@ -728,6 +1027,79 @@ const Learning = () => {
       
       // Update current galaxy
       setCurrentGalaxy(currentGalaxyId);
+      
+      // Check if the current module is completed
+      const isCurrentModuleCompleted = completedModulesList.includes(currentModuleId);
+      logger.log(`[Learning] Current module ${currentModuleId} completed status: ${isCurrentModuleCompleted}`);
+      
+      // If the current module is completed, we should find the next one instead of resetting to this one
+      if (isCurrentModuleCompleted) {
+        logger.log(`[Learning] Current module ${currentModuleId} is completed, attempting to find next module`);
+        
+        // Find which galaxy and module index the current module belongs to
+        let moduleGalaxy = null;
+        let moduleIndex = -1;
+        
+        for (const galaxy of galaxiesData) {
+          const foundModuleIndex = galaxy.modules.findIndex(m => m.id === currentModuleId);
+          if (foundModuleIndex !== -1) {
+            moduleGalaxy = galaxy;
+            moduleIndex = foundModuleIndex;
+            break;
+          }
+        }
+        
+        if (moduleGalaxy && moduleIndex !== -1) {
+          logger.log(`[Learning] Found current module ${currentModuleId} in galaxy ${moduleGalaxy.id} at index ${moduleIndex}`);
+          
+          // Check if there's a next module in the same galaxy
+          if (moduleIndex < moduleGalaxy.modules.length - 1) {
+            const nextModule = moduleGalaxy.modules[moduleIndex + 1];
+            logger.log(`[Learning] Next module in same galaxy: ${nextModule.id}`);
+            
+            // Don't override if the current module is set to the next one already
+            if (nextModule.id !== userData.currentModuleId) {
+              // Important: Make sure the next module is unlocked, regardless of its current status
+              logger.log(`[Learning] Setting current module to next module: ${nextModule.id} and explicitly unlocking it`);
+              setCurrentModuleId(nextModule.id);
+              
+              // Update in Firebase to persist this change and explicitly unlock the module
+              try {
+                await updateDoc(userProgressRef, {
+                  currentModuleId: nextModule.id,
+                  lastActivityTimestamp: serverTimestamp()
+                });
+                logger.log(`[Learning] Updated currentModuleId in Firestore to ${nextModule.id}`);
+                
+                // Explicitly unlock the next module in the moduleProgress subcollection
+                const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), nextModule.id);
+                const moduleProgressDoc = await getDoc(moduleProgressRef);
+                
+                if (moduleProgressDoc.exists()) {
+                  // Update existing module progress doc to unlocked
+                  await updateDoc(moduleProgressRef, {
+                    locked: false,
+                    lastAccessed: serverTimestamp()
+                  });
+                  logger.log(`[Learning] Explicitly unlocked module ${nextModule.id} in moduleProgress collection`);
+                } else {
+                  // Create new module progress doc with unlocked status
+                  await setDoc(moduleProgressRef, {
+                    moduleId: nextModule.id,
+                    completed: false,
+                    locked: false,
+                    completedLessons: [],
+                    lastAccessed: serverTimestamp()
+                  });
+                  logger.log(`[Learning] Created new unlocked module progress for ${nextModule.id}`);
+                }
+              } catch (updateError) {
+                logger.error('[Learning] Error updating currentModuleId in Firestore and unlocking next module:', updateError);
+              }
+            }
+          }
+        }
+      }
       
       // Process galaxies to update their completion and unlocked status
       const processedGalaxies = galaxiesData.map((galaxy, galaxyIndex) => {
@@ -752,7 +1124,7 @@ const Learning = () => {
           
           // Check if previous galaxy is completed but this one isn't unlocked yet
           if (isPreviousGalaxyCompleted && !galaxy.unlocked) {
-            console.log(`[Learning] Galaxy ${previousGalaxy.id} completed, unlocking Galaxy ${galaxy.id}`);
+            logger.log(`[Learning] Galaxy ${previousGalaxy.id} completed, unlocking Galaxy ${galaxy.id}`);
             isUnlocked = true;
             
             // Update in Firebase to ensure persistence
@@ -760,18 +1132,21 @@ const Learning = () => {
               updateDoc(userProgressRef, {
                 unlockedGalaxies: arrayUnion(galaxy.id),
                 lastActivityTimestamp: serverTimestamp()
-              }).catch(err => console.error(`[Learning] Error updating unlocked galaxy ${galaxy.id}:`, err));
+              }).catch(err => logger.error(`[Learning] Error updating unlocked galaxy ${galaxy.id}:`, err));
             } catch (error) {
-              console.error(`[Learning] Error updating unlocked galaxy ${galaxy.id}:`, error);
+              logger.error(`[Learning] Error updating unlocked galaxy ${galaxy.id}:`, error);
             }
             
-            // Show notification toast
-            toast({
+            // REMOVING GALAXY UNLOCKED TOAST
+            // The following toast has been removed to avoid unwanted popups
+            /*
+      toast({
               title: "New Galaxy Unlocked!",
               description: `You've unlocked the ${galaxy.name}!`,
               duration: 4000,
               className: "galaxy-unlocked-toast"
             });
+            */
           }
         }
         
@@ -797,16 +1172,62 @@ const Learning = () => {
             isModuleLocked = !isPreviousModuleCompleted && !isModuleCompleted;
           }
           
+          // IMPORTANT FIX: Current module should never be locked
+          if (isModuleCurrent || module.id === currentModuleId) {
+            isModuleLocked = false;
+          }
+          
+          // CRITICAL FIX: Force unlock "objects-ownership" module if it's the second module in galaxy 2
+          if (galaxy.id === 2 && moduleIndex === 1 && module.id === 'objects-ownership') {
+            logger.log('[Learning] CRITICAL FIX: Force unlocking Objects & Ownership module');
+            isModuleLocked = false;
+            
+            // Check if previous module (Move Language) is completed
+            const moveLanguageModule = galaxy.modules.find(m => m.id === 'move-language');
+            if (moveLanguageModule && (moveLanguageModule.completed || completedModulesList.includes('move-language'))) {
+              logger.log('[Learning] Move Language is completed, ensuring Objects & Ownership is unlocked');
+              isModuleLocked = false;
+            }
+            
+            // Also update the module progress in Firestore
+            try {
+              const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), 'objects-ownership');
+              getDoc(moduleProgressRef).then(moduleDoc => {
+                if (moduleDoc.exists()) {
+                  updateDoc(moduleProgressRef, {
+                    locked: false,
+                    lastAccessed: serverTimestamp()
+                  }).catch(err => logger.error('[Learning] Error unlocking objects-ownership module:', err));
+                } else {
+                  setDoc(moduleProgressRef, {
+                    moduleId: 'objects-ownership',
+                    completed: false,
+                    locked: false,
+                    completedLessons: [],
+                    lastAccessed: serverTimestamp()
+                  }).catch(err => logger.error('[Learning] Error creating objects-ownership module progress:', err));
+                }
+              }).catch(err => logger.error('[Learning] Error checking objects-ownership module progress:', err));
+            } catch (error) {
+              logger.error('[Learning] Error unlocking objects-ownership module:', error);
+            }
+          }
+          
+          // Completed modules should never be locked
+          if (isModuleCompleted) {
+            isModuleLocked = false;
+          }
+          
           return {
-            ...module,
+              ...module,
             completed: isModuleCompleted,
             current: isModuleCurrent,
             locked: isModuleLocked
           };
         });
-        
-        return {
-          ...galaxy,
+            
+            return {
+              ...galaxy,
           completed: isCompleted,
           current: isCurrent,
           unlocked: isUnlocked,
@@ -816,7 +1237,7 @@ const Learning = () => {
       
       // Update galaxies state
       setGalaxies(processedGalaxies);
-      
+          
       // Calculate and update user level based on XP
       const userXp = userData.xp || 0;
       const userLevel = calculateLevel(userXp);
@@ -830,18 +1251,18 @@ const Learning = () => {
       const currentLevelXp = calculateXpForLevel(userLevel);
       const xpProgress = ((userXp - currentLevelXp) / (nextLevelXp - currentLevelXp)) * 100;
       setLevelProgress(Math.min(100, Math.max(0, xpProgress)));
-      
-      // Calculate overall progress statistics
+          
+          // Calculate overall progress statistics
       const totalModules = processedGalaxies.reduce((total, galaxy) => total + galaxy.modules.length, 0);
       const completedModulesCount = completedModulesList.length;
-      const overallPercentage = Math.floor((completedModulesCount / totalModules) * 100);
-      
-      setUserProgress({
-        overallProgress: overallPercentage,
-        totalModulesCompleted: completedModulesCount,
-        totalModules
-      });
-      
+          const overallPercentage = Math.floor((completedModulesCount / totalModules) * 100);
+          
+          setUserProgress({
+            overallProgress: overallPercentage,
+            totalModulesCompleted: completedModulesCount,
+            totalModules
+          });
+          
       // Check if the current galaxy is actually completed and should be updated
       const currentGalaxyData = processedGalaxies.find(g => g.id === currentGalaxyId);
       if (currentGalaxyData && currentGalaxyData.completed) {
@@ -850,7 +1271,7 @@ const Learning = () => {
         if (nextGalaxyIndex < processedGalaxies.length) {
           const nextGalaxy = processedGalaxies[nextGalaxyIndex];
           if (nextGalaxy.unlocked) {
-            console.log(`[Learning] Current galaxy ${currentGalaxyId} is completed, updating current galaxy to ${nextGalaxy.id}`);
+            logger.log(`[Learning] Current galaxy ${currentGalaxyId} is completed, updating current galaxy to ${nextGalaxy.id}`);
             
             // Find first module in next galaxy
             const firstModule = nextGalaxy.modules.length > 0 ? nextGalaxy.modules[0] : null;
@@ -876,9 +1297,9 @@ const Learning = () => {
                   currentModuleId: firstModule.id,
                   rocketPosition: newRocketPosition,
                   lastActivityTimestamp: serverTimestamp()
-                }).catch(err => console.error('[Learning] Error updating current galaxy and rocket position:', err));
+                }).catch(err => logger.error('[Learning] Error updating current galaxy and rocket position:', err));
               } catch (error) {
-                console.error('[Learning] Error updating current galaxy and rocket position:', error);
+                logger.error('[Learning] Error updating current galaxy and rocket position:', error);
               }
               
               // Update processed galaxies
@@ -899,7 +1320,7 @@ const Learning = () => {
       }
       
       // Log the updated state for debugging
-      console.log('[Learning] Refreshed progress data:', {
+      logger.log('[Learning] Refreshed progress data:', {
         completedModules: completedModulesList.length,
         currentModule: currentModuleId,
         currentGalaxy: currentGalaxyId,
@@ -918,7 +1339,7 @@ const Learning = () => {
       }));
       
     } catch (error) {
-      console.error('[Learning] Error refreshing progress data:', error);
+      logger.error('[Learning] Error refreshing progress data:', error);
       toast({
         title: "Error",
         description: "Failed to refresh your progress data",
@@ -927,6 +1348,91 @@ const Learning = () => {
       });
     } finally {
       setLoading(false);
+      
+      // Ensure module unlocking in database is consistent with our logic
+      ensureModuleUnlockingInDatabase();
+    }
+  };
+
+  // Create a new function to ensure modules are properly unlocked in Firestore
+  // Add this function to the component, after the refreshProgressData function
+  const ensureModuleUnlockingInDatabase = async () => {
+    if (!walletAddress) return;
+    
+    try {
+      // Get user progress document
+      const userProgressRef = doc(db, 'learningProgress', walletAddress);
+      const userDoc = await getDoc(userProgressRef);
+      
+      if (!userDoc.exists()) return;
+      
+      const userData = userDoc.data();
+      const completedModulesList = userData.completedModules || [];
+      
+      // Process all galaxies to ensure proper module unlocking
+      for (const galaxy of galaxies) {
+        // Skip locked galaxies
+        if (!galaxy.unlocked) continue;
+        
+        // Process modules within this galaxy
+        for (let i = 1; i < galaxy.modules.length; i++) {
+          const currentModule = galaxy.modules[i];
+          const previousModule = galaxy.modules[i-1];
+          
+          // If previous module is completed, this one should be unlocked
+          if (previousModule && (previousModule.completed || completedModulesList.includes(previousModule.id))) {
+            // Ensure this module is unlocked in Firestore
+            const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), currentModule.id);
+            const moduleDoc = await getDoc(moduleProgressRef);
+            
+            if (moduleDoc.exists()) {
+              const moduleData = moduleDoc.data();
+              if (moduleData.locked) {
+                await updateDoc(moduleProgressRef, {
+                  locked: false,
+                  lastAccessed: serverTimestamp()
+                });
+                logger.log(`[Learning] Unlocked module ${currentModule.id} in database after detecting previous module completed`);
+              }
+            } else {
+              // Create unlocked module document
+              await setDoc(moduleProgressRef, {
+                moduleId: currentModule.id,
+                completed: false,
+                locked: false,
+                completedLessons: [],
+                lastAccessed: serverTimestamp()
+              });
+              logger.log(`[Learning] Created unlocked module ${currentModule.id} in database`);
+            }
+          }
+        }
+      }
+      
+      // Special handling for Objects & Ownership module
+      const moveLanguageCompleted = completedModulesList.includes('move-language');
+      if (moveLanguageCompleted) {
+        const objectsOwnershipRef = doc(collection(userProgressRef, 'moduleProgress'), 'objects-ownership');
+        const moduleDoc = await getDoc(objectsOwnershipRef);
+        
+        if (moduleDoc.exists()) {
+          await updateDoc(objectsOwnershipRef, {
+            locked: false,
+            lastAccessed: serverTimestamp()
+          });
+        } else {
+          await setDoc(objectsOwnershipRef, {
+            moduleId: 'objects-ownership',
+            completed: false,
+            locked: false,
+            completedLessons: [],
+            lastAccessed: serverTimestamp()
+          });
+        }
+        logger.log('[Learning] Ensured Objects & Ownership module is unlocked since Move Language is completed');
+      }
+    } catch (error) {
+      logger.error('[Learning] Error in ensureModuleUnlockingInDatabase:', error);
     }
   };
 
@@ -1024,6 +1530,57 @@ const Learning = () => {
     }
   };
 
+  // Update rocket position when a module is completed
+  const updateRocketPosition = useCallback((moduleId: string, nextModuleId: string) => {
+    logger.log(`[Learning] Updating rocket position for completed module ${moduleId}, next module: ${nextModuleId}`);
+    
+    // Find the next module's galaxy and position
+    let nextModuleGalaxy: GalaxyType | undefined;
+    let nextModule: ModuleType | undefined;
+    
+    // Search for the next module in all galaxies
+    for (const galaxy of galaxies) {
+      const foundModule = galaxy.modules.find(m => m.id === nextModuleId);
+      if (foundModule) {
+        nextModuleGalaxy = galaxy;
+        nextModule = foundModule;
+        break;
+      }
+    }
+    
+    if (nextModuleGalaxy && nextModule) {
+      // Calculate new rocket position
+      const newRocketPosition = {
+        x: nextModuleGalaxy.position.x + nextModule.position.x,
+        y: nextModuleGalaxy.position.y + nextModule.position.y
+      };
+      
+      logger.log(`[Learning] Found next module in galaxy ${nextModuleGalaxy.id}, updating rocket position to:`, newRocketPosition);
+      
+      // Update rocket position
+      setRocketPosition(newRocketPosition);
+      
+      // Update in Firebase if user is logged in
+      if (walletAddress) {
+        try {
+          const userProgressRef = doc(db, 'learningProgress', walletAddress);
+          updateDoc(userProgressRef, {
+            rocketPosition: newRocketPosition,
+            currentModuleId: nextModuleId,
+            lastActivityTimestamp: serverTimestamp()
+          }).catch(err => logger.error('[Learning] Error updating rocket position:', err));
+        } catch (error) {
+          logger.error('[Learning] Error updating rocket position:', error);
+        }
+      }
+      
+      // Update current module ID
+      setCurrentModuleId(nextModuleId);
+    } else {
+      logger.warn(`[Learning] Could not find next module ${nextModuleId} in any galaxy`);
+    }
+  }, [galaxies, walletAddress]);
+  
   // Listen for module completion events from other components
   useEffect(() => {
     const handleModuleCompletion = (event: CustomEvent) => {
@@ -1033,7 +1590,7 @@ const Learning = () => {
       
       if (eventWalletAddress !== walletAddress) return;
       
-      console.log('[Learning] Module completion event received:', event.detail);
+      logger.log('[Learning] Module completion event received:', event.detail);
       
       toast({
         title: "Module Completed!",
@@ -1041,9 +1598,49 @@ const Learning = () => {
         duration: 3000,
       });
       
-      // Update current module ID locally
+      // Explicitly unlock the next module in Firestore if it exists
+      if (nextModuleId && walletAddress) {
+        try {
+          const userProgressRef = doc(db, 'learningProgress', walletAddress);
+          
+          // Update current module ID
+          updateDoc(userProgressRef, {
+            currentModuleId: nextModuleId,
+            lastActivityTimestamp: serverTimestamp()
+          }).catch(err => logger.error('[Learning] Error updating currentModuleId:', err));
+          
+          // Also explicitly unlock the module in the moduleProgress subcollection
+          const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), nextModuleId);
+          getDoc(moduleProgressRef).then(moduleDoc => {
+            if (moduleDoc.exists()) {
+              // Update existing module progress doc to unlocked
+              updateDoc(moduleProgressRef, {
+                locked: false,
+                lastAccessed: serverTimestamp()
+              }).then(() => {
+                logger.log(`[Learning] Successfully unlocked next module ${nextModuleId} in Firestore`);
+              }).catch(err => logger.error(`[Learning] Error unlocking module ${nextModuleId}:`, err));
+            } else {
+              // Create new module progress doc with unlocked status
+              setDoc(moduleProgressRef, {
+                moduleId: nextModuleId,
+                completed: false,
+                locked: false,
+                completedLessons: [],
+                lastAccessed: serverTimestamp()
+              }).then(() => {
+                logger.log(`[Learning] Created new unlocked module progress for ${nextModuleId}`);
+              }).catch(err => logger.error(`[Learning] Error creating module progress for ${nextModuleId}:`, err));
+            }
+          }).catch(err => logger.error(`[Learning] Error checking module progress for ${nextModuleId}:`, err));
+        } catch (error) {
+          logger.error('[Learning] Error updating next module locked status:', error);
+        }
+      }
+      
+      // Update rocket position and current module ID
       if (nextModuleId) {
-        setCurrentModuleId(nextModuleId);
+        updateRocketPosition(moduleId, nextModuleId);
       }
       
       // Add completed module to local state
@@ -1070,7 +1667,7 @@ const Learning = () => {
         }
         
         if (!moduleGalaxy) {
-          console.warn('[Learning] Could not find galaxy for module:', moduleId);
+          logger.warn('[Learning] Could not find galaxy for module:', moduleId);
           return prevGalaxies;
         }
         
@@ -1081,7 +1678,45 @@ const Learning = () => {
           locked: false
         };
         
-        // Find and unlock the next module in the sequence
+        // Find and unlock the next module in the same galaxy if it exists
+        if (moduleIndex < moduleGalaxy.modules.length - 1) {
+          const nextModuleInGalaxy = moduleGalaxy.modules[moduleIndex + 1];
+          // Unlock the next module in the same galaxy
+          moduleGalaxy.modules[moduleIndex + 1] = {
+            ...nextModuleInGalaxy,
+            locked: false
+          };
+          logger.log(`[Learning] Unlocked next module in same galaxy: ${nextModuleInGalaxy.id}`);
+          
+          // Ensure it's also unlocked in Firestore
+          if (walletAddress) {
+            try {
+              const userProgressRef = doc(db, 'learningProgress', walletAddress);
+              const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), nextModuleInGalaxy.id);
+              
+              getDoc(moduleProgressRef).then(moduleDoc => {
+                if (moduleDoc.exists()) {
+                  updateDoc(moduleProgressRef, {
+                    locked: false,
+                    lastAccessed: serverTimestamp()
+                  }).catch(err => logger.error(`[Learning] Error unlocking next module ${nextModuleInGalaxy.id}:`, err));
+                } else {
+                  setDoc(moduleProgressRef, {
+                    moduleId: nextModuleInGalaxy.id,
+                    completed: false,
+                    locked: false,
+                    completedLessons: [],
+                    lastAccessed: serverTimestamp()
+                  }).catch(err => logger.error(`[Learning] Error creating module progress for ${nextModuleInGalaxy.id}:`, err));
+                }
+              }).catch(err => logger.error(`[Learning] Error checking module progress for ${nextModuleInGalaxy.id}:`, err));
+            } catch (error) {
+              logger.error(`[Learning] Error updating module lock status for ${nextModuleInGalaxy.id}:`, error);
+            }
+          }
+        }
+        
+        // Find and unlock the next module in the sequence (might be in a different galaxy)
         if (nextModuleId) {
           for (const galaxy of updatedGalaxies) {
             const nextModuleIndex = galaxy.modules.findIndex(m => m.id === nextModuleId);
@@ -1120,7 +1755,7 @@ const Learning = () => {
         const allModulesCompleted = moduleGalaxy.modules.every(m => m.completed);
         
         if (allModulesCompleted) {
-          console.log('[Learning] All modules completed in galaxy:', moduleGalaxy.id);
+          logger.log('[Learning] All modules completed in galaxy:', moduleGalaxy.id);
           
           // Mark the galaxy as completed
           moduleGalaxy.completed = true;
@@ -1146,13 +1781,7 @@ const Learning = () => {
                   }
                 });
                 document.dispatchEvent(galaxyUnlockedEvent);
-                
-                toast({
-                  title: "New Galaxy Unlocked!",
-                  description: `You've unlocked the ${nextGalaxy.name}!`,
-                  duration: 4000,
-                  className: "galaxy-unlocked-toast"
-                });
+                // No toast popup - removed to avoid spam
               }, 1000);
             }
           }
@@ -1171,7 +1800,7 @@ const Learning = () => {
       
       const { galaxyId, nextGalaxyId, firstModuleId, rocketPosition: eventRocketPosition } = event.detail;
       
-      console.log('[Learning] Galaxy unlock event received:', galaxyId, nextGalaxyId);
+      logger.log('[Learning] Galaxy unlock event received:', galaxyId, nextGalaxyId);
       
       // Update galaxies to unlock the next one
       setGalaxies(prevGalaxies => {
@@ -1182,7 +1811,7 @@ const Learning = () => {
         const completedGalaxyIndex = updatedGalaxies.findIndex(g => g.id === galaxyId);
         
         if (completedGalaxyIndex === -1) {
-          console.warn(`[Learning] Galaxy with ID ${galaxyId} not found`);
+          logger.warn(`[Learning] Galaxy with ID ${galaxyId} not found`);
           return prevGalaxies;
         }
         
@@ -1198,7 +1827,7 @@ const Learning = () => {
         
         // Make sure the next galaxy exists
         if (nextGalaxyIndex >= updatedGalaxies.length) {
-          console.log(`[Learning] No more galaxies after galaxy ${galaxyId}`);
+          logger.log(`[Learning] No more galaxies after galaxy ${galaxyId}`);
           return updatedGalaxies;
         }
         
@@ -1209,7 +1838,7 @@ const Learning = () => {
         const firstModule = nextGalaxy.modules.length > 0 ? nextGalaxy.modules[0] : null;
         
         if (!firstModule) {
-          console.warn(`[Learning] No modules found in galaxy ${nextGalaxy.id}`);
+          logger.warn(`[Learning] No modules found in galaxy ${nextGalaxy.id}`);
           return updatedGalaxies;
         }
         
@@ -1272,22 +1901,16 @@ const Learning = () => {
                 y: nextGalaxy.position.y + firstModule.position.y
               },
               lastActivityTimestamp: serverTimestamp()
-            }).catch(err => console.error('[Learning] Error updating galaxy unlock data:', err));
+            }).catch(err => logger.error('[Learning] Error updating galaxy unlock data:', err));
           } catch (error) {
-            console.error('[Learning] Error updating galaxy unlock data:', error);
+            logger.error('[Learning] Error updating galaxy unlock data:', error);
           }
         }
         
         return updatedGalaxies;
       });
       
-      // Show a success notification
-      toast({
-        title: "New Galaxy Unlocked!",
-        description: "You've unlocked a new galaxy to explore!",
-        duration: 4000,
-        className: "galaxy-unlocked-toast"
-      });
+      // REMOVED: Galaxy unlocked toast notification
       
       // Refresh data to ensure everything is up to date
       refreshProgressData();
@@ -1302,7 +1925,7 @@ const Learning = () => {
       document.removeEventListener('moduleCompleted', handleModuleCompletion as EventListener);
       document.removeEventListener('galaxyUnlocked', handleGalaxyUnlock as EventListener);
     };
-  }, [walletAddress, completedModules, refreshProgressData, toast]);
+  }, [walletAddress, completedModules, refreshProgressData, toast, updateRocketPosition]);
 
   // Helper functions for XP and level calculations
   const calculateLevel = (xp: number): number => {
@@ -1365,7 +1988,7 @@ const Learning = () => {
         
         // Update current galaxy if it's not already set
         if (galaxy.id !== currentGalaxy) {
-          console.log(`[Learning] Updating current galaxy from ${currentGalaxy} to ${galaxy.id} based on current module`);
+          logger.log(`[Learning] Updating current galaxy from ${currentGalaxy} to ${galaxy.id} based on current module`);
           setCurrentGalaxy(galaxy.id);
         }
         
@@ -1378,9 +2001,9 @@ const Learning = () => {
               currentGalaxyId: galaxy.id,
               currentModuleId: currentModuleId,
               lastActivityTimestamp: serverTimestamp()
-            }).catch(err => console.error('[Learning] Error updating rocket position:', err));
+            }).catch(err => logger.error('[Learning] Error updating rocket position:', err));
           } catch (error) {
-            console.error('[Learning] Error updating rocket position:', error);
+            logger.error('[Learning] Error updating rocket position:', error);
           }
         }
         
@@ -1411,6 +2034,88 @@ const Learning = () => {
     }
   }, [currentModuleId, galaxies, walletAddress]);
 
+  // Find the emergency fix useEffect and update it:
+  const [emergencyFixRan, setEmergencyFixRan] = useState(false);
+
+  useEffect(() => {
+    if (!walletAddress || emergencyFixRan) return;
+    
+    logger.log('[EMERGENCY FIX] Running emergency unlock for all modules');
+    
+    // Direct database update to force unlock all appropriate modules
+    const unlockerFunction = async () => {
+      try {
+        const userProgressRef = doc(db, 'learningProgress', walletAddress);
+        const userDoc = await getDoc(userProgressRef);
+        
+        if (!userDoc.exists()) return;
+        
+        const userData = userDoc.data();
+        const completedModulesList = userData.completedModules || [];
+        
+        // Check if Move Language is completed
+        const moveLanguageCompleted = completedModulesList.includes('move-language');
+        
+        if (moveLanguageCompleted) {
+          logger.log('[EMERGENCY FIX] Move Language is completed, ensuring Objects & Ownership is unlocked');
+          
+          // Explicitly unlock Objects & Ownership in Firestore
+          const objectsOwnershipRef = doc(collection(userProgressRef, 'moduleProgress'), 'objects-ownership');
+          const moduleDoc = await getDoc(objectsOwnershipRef);
+          
+          if (moduleDoc.exists()) {
+            await updateDoc(objectsOwnershipRef, {
+              locked: false,
+              lastAccessed: serverTimestamp()
+            });
+          } else {
+            await setDoc(objectsOwnershipRef, {
+              moduleId: 'objects-ownership',
+              completed: false,
+              locked: false,
+              completedLessons: [],
+              lastAccessed: serverTimestamp()
+            });
+          }
+          
+          // Update UI
+          setGalaxies(prevGalaxies => {
+            return prevGalaxies.map(galaxy => {
+              if (galaxy.id === 2) {
+                return {
+                  ...galaxy,
+                  unlocked: true,
+                  modules: galaxy.modules.map(module => {
+                    if (module.id === 'objects-ownership') {
+                      return { ...module, locked: false };
+                    }
+                    return module;
+                  })
+                };
+              }
+              return galaxy;
+            });
+          });
+        }
+        
+        // Force refresh data
+        refreshProgressData();
+        
+        // Mark that we've successfully run the emergency fix
+        setEmergencyFixRan(true);
+        
+      } catch (error) {
+        logger.error('[EMERGENCY FIX] Error unlocking modules:', error);
+      }
+    };
+    
+    // Run the unlocking function immediately
+    unlockerFunction();
+    
+    // No need for retries or intervals as they cause log spam
+    
+  }, [walletAddress, refreshProgressData, emergencyFixRan]);
+
   // Force unlock the next galaxy if all modules in the current galaxy are completed
   useEffect(() => {
     // This effect runs on component mount and whenever galaxies or completedModules change
@@ -1418,108 +2123,90 @@ const Learning = () => {
 
     // Check all galaxies for completion and unlock next ones
     const checkGalaxiesForCompletion = async () => {
-      for (let index = 0; index < galaxies.length - 1; index++) {
-        const galaxy = galaxies[index];
-        const nextGalaxy = galaxies[index + 1];
+      const updatedGalaxies = [...galaxies];
+      let needsUpdate = false;
+      
+      for (let index = 0; index < updatedGalaxies.length - 1; index++) {
+        const galaxy = updatedGalaxies[index];
+        const nextGalaxy = updatedGalaxies[index + 1];
         
         // Skip if next galaxy is already unlocked
         if (!nextGalaxy || nextGalaxy.unlocked) continue;
         
-        // Check if this galaxy is completed
-        const isGalaxyCompleted = galaxy.modules.every(m => 
-          m.completed || completedModules.includes(m.id)
-        );
+        // Check if this galaxy is completed - ALL modules must be completed
+        const isGalaxyCompleted = galaxy.modules.length > 0 && 
+          galaxy.modules.every(module => module.completed || completedModules.includes(module.id));
         
         if (isGalaxyCompleted) {
-          console.log(`[Learning] Galaxy ${galaxy.id} completed, forcing unlock of Galaxy ${nextGalaxy.id}`);
+          logger.log(`[Learning] Galaxy ${galaxy.id} completed, ensuring Galaxy ${nextGalaxy.id} is unlocked`);
+          
+          // Log all modules in the current galaxy and their completion status
+          galaxy.modules.forEach(module => {
+            logger.log(`[Learning] - Module ${module.id}: completed=${module.completed || completedModules.includes(module.id)}`);
+          });
           
           // Find the first module in the next galaxy
           const firstModule = nextGalaxy.modules.length > 0 ? nextGalaxy.modules[0] : null;
           
           if (!firstModule) {
-            console.warn(`[Learning] No modules found in galaxy ${nextGalaxy.id}`);
+            logger.warn(`[Learning] No modules found in galaxy ${nextGalaxy.id}`);
             continue;
           }
           
-          // Update galaxies to unlock next galaxy
-          setGalaxies(prevGalaxies => {
-            const updatedGalaxies = [...prevGalaxies];
-            const nextGalaxyIndex = updatedGalaxies.findIndex(g => g.id === nextGalaxy.id);
-            const currentGalaxyIndex = updatedGalaxies.findIndex(g => g.id === galaxy.id);
-            
-            if (nextGalaxyIndex !== -1) {
-              // Mark the current galaxy as completed and not current
-              if (currentGalaxyIndex !== -1) {
-                updatedGalaxies[currentGalaxyIndex] = {
-                  ...updatedGalaxies[currentGalaxyIndex],
-                  completed: true,
-                  current: false
-                };
-              }
-              
-              // Set the next galaxy as current and unlocked
-              updatedGalaxies[nextGalaxyIndex] = {
-                ...updatedGalaxies[nextGalaxyIndex],
-                unlocked: true,
-                current: true,
-                modules: updatedGalaxies[nextGalaxyIndex].modules.map((m, idx) => {
-                  if (idx === 0) {
-                    // Set first module as current and unlocked
-                    return { ...m, locked: false, current: true };
-                  } else if (idx === 1) {
-                    // Make sure second module is properly locked/unlocked
-                    return { ...m, locked: !m.completed };
-                  }
-                  return m;
-                })
-              };
-            }
-            
-            return updatedGalaxies;
-          });
+          // Update the next galaxy to be unlocked
+          nextGalaxy.unlocked = true;
           
-          // Update the current galaxy state
-          setCurrentGalaxy(nextGalaxy.id);
+          // Unlock the first module in the next galaxy
+          if (nextGalaxy.modules.length > 0) {
+            nextGalaxy.modules[0].locked = false;
+          }
           
-          // Update the current module to the first module in the next galaxy
-          const firstModuleId = firstModule.id;
-          setCurrentModuleId(firstModuleId);
-          
-          // Update rocket position to the first module of the new galaxy
-          const newRocketPosition = {
-            x: nextGalaxy.position.x + firstModule.position.x,
-            y: nextGalaxy.position.y + firstModule.position.y
-          };
-          
-          setRocketPosition(newRocketPosition);
-          
-          // Also update in Firebase
+          // Update in Firebase
           try {
             const userProgressRef = doc(db, 'learningProgress', walletAddress);
             await updateDoc(userProgressRef, {
               unlockedGalaxies: arrayUnion(nextGalaxy.id),
-              currentGalaxyId: nextGalaxy.id,
-              currentModuleId: firstModuleId,
-              rocketPosition: newRocketPosition,
               lastActivityTimestamp: serverTimestamp()
             });
+            
+            // Also unlock the first module in the moduleProgress subcollection
+            if (firstModule) {
+              const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), firstModule.id);
+              const moduleDoc = await getDoc(moduleProgressRef);
+              
+              if (moduleDoc.exists()) {
+                await updateDoc(moduleProgressRef, {
+                  locked: false,
+                  lastAccessed: serverTimestamp()
+                });
+              } else {
+                await setDoc(moduleProgressRef, {
+                  moduleId: firstModule.id,
+                  locked: false,
+                  completed: false,
+                  completedLessons: [],
+                  lastAccessed: serverTimestamp()
+                });
+              }
+            }
           } catch (error) {
-            console.error(`[Learning] Error updating unlocked galaxy ${nextGalaxy.id}:`, error);
+            logger.error(`[Learning] Error updating unlocked galaxy ${nextGalaxy.id}:`, error);
           }
           
-          // Show notification toast
-          toast({
-            title: "New Galaxy Unlocked!",
-            description: `You've unlocked the ${nextGalaxy.name}!`,
-            duration: 4000,
-            className: "galaxy-unlocked-toast"
-          });
+          needsUpdate = true;
+        } else {
+          logger.log(`[Learning] Galaxy ${galaxy.id} is not fully completed yet, not unlocking Galaxy ${nextGalaxy.id}`);
         }
+      }
+      
+      // Update the galaxies state if needed
+      if (needsUpdate) {
+        setGalaxies(updatedGalaxies);
       }
     };
     
     checkGalaxiesForCompletion();
-  }, [galaxies, completedModules, walletAddress, toast]);
+  }, [galaxies, completedModules, walletAddress]);
 
   // Check if any galaxy is completed and unlock the next one if needed
   useEffect(() => {
@@ -1532,7 +2219,7 @@ const Learning = () => {
       if (currentGalaxy && nextGalaxy && 
           currentGalaxy.modules.every(m => m.completed) && 
           !nextGalaxy.unlocked) {
-        console.log(`[Learning] Galaxy ${currentGalaxy.id} completed, unlocking Galaxy ${nextGalaxy.id}`);
+        logger.log(`[Learning] Galaxy ${currentGalaxy.id} completed, unlocking Galaxy ${nextGalaxy.id}`);
         
         setGalaxies(prevGalaxies => {
           const updatedGalaxies = [...prevGalaxies];
@@ -1553,6 +2240,96 @@ const Learning = () => {
       }
     }
   }, [galaxies, walletAddress]);
+
+  // Helper function to sort galaxies with completed ones at the end
+  const sortGalaxies = (galaxiesToSort: GalaxyType[]): GalaxyType[] => {
+    // First find the current galaxy
+    const currentGalaxyObj = galaxiesToSort.find(g => g.current);
+    
+    // Separate completed and non-completed galaxies
+    const completedGalaxies = galaxiesToSort.filter(g => g.completed && !g.current);
+    const incompleteGalaxies = galaxiesToSort.filter(g => !g.completed && !g.current);
+    
+    // Sort each group by ID
+    const sortById = (a: GalaxyType, b: GalaxyType) => a.id - b.id;
+    completedGalaxies.sort(sortById);
+    incompleteGalaxies.sort(sortById);
+    
+    // Combine with current galaxy first, then incomplete, then completed
+    const result: GalaxyType[] = [];
+    
+    // Add current galaxy if it exists
+    if (currentGalaxyObj) {
+      result.push(currentGalaxyObj);
+    }
+    
+    // Add incomplete galaxies
+    result.push(...incompleteGalaxies);
+    
+    // Add completed galaxies at the end
+    result.push(...completedGalaxies);
+    
+    return result;
+  };
+
+  // Add a useEffect that runs our module unlocking logic on component mount and whenever user progress changes
+  // Add this after the other useEffects:
+
+  // Add specific effect to ensure consistent module unlocking on initial load and data refresh
+  useEffect(() => {
+    if (!walletAddress || galaxies.length === 0) return;
+    
+    // Run the module unlocking logic
+    ensureModuleUnlockingInDatabase();
+    
+    // Also make sure objects-ownership module is always unlocked if move-language is completed
+    const moveLanguageCompleted = completedModules.includes('move-language');
+    if (moveLanguageCompleted) {
+      // Update local state
+      setGalaxies(prevGalaxies => {
+        return prevGalaxies.map(galaxy => {
+          if (galaxy.id === 2) {
+            return {
+              ...galaxy,
+              modules: galaxy.modules.map(module => {
+                if (module.id === 'objects-ownership') {
+                  return { ...module, locked: false };
+                }
+                return module;
+              })
+            };
+          }
+          return galaxy;
+        });
+      });
+      
+      // Update in Firestore if needed
+      if (walletAddress) {
+        try {
+          const userProgressRef = doc(db, 'learningProgress', walletAddress);
+          const objectsOwnershipRef = doc(collection(userProgressRef, 'moduleProgress'), 'objects-ownership');
+          getDoc(objectsOwnershipRef).then(doc => {
+            if (doc.exists() && doc.data().locked) {
+              updateDoc(objectsOwnershipRef, {
+                locked: false,
+                lastAccessed: serverTimestamp()
+              }).catch(err => logger.error('[Learning] Error unlocking objects-ownership module:', err));
+            } else if (!doc.exists()) {
+              setDoc(objectsOwnershipRef, {
+                moduleId: 'objects-ownership',
+                locked: false,
+                completed: false,
+                completedLessons: [],
+                lastAccessed: serverTimestamp()
+              }).catch(err => logger.error('[Learning] Error creating objects-ownership module:', err));
+            }
+          }).catch(err => logger.error('[Learning] Error checking objects-ownership module:', err));
+        } catch (error) {
+          logger.error('[Learning] Error ensuring objects-ownership is unlocked:', error);
+        }
+      }
+    }
+  }, [walletAddress, completedModules, galaxies.length]);
 
   return (
     <div className="relative min-h-screen">
@@ -1699,38 +2476,123 @@ const Learning = () => {
           ) : (
             // Connected state - show progress
             <div className="mt-6 mb-10">
+              {/* EMERGENCY FIX: Button to force unlock objects-ownership module */}
+              <div className="flex justify-center mb-4">
+                <Button
+                  onClick={async () => {
+                    if (!walletAddress) return;
+                    
+                    toast({
+                      title: "Unlocking Module",
+                      description: "Attempting to force unlock Objects & Ownership module...",
+                      duration: 3000,
+                    });
+                    
+                    try {
+                      // Direct database update
+                      const userProgressRef = doc(db, 'learningProgress', walletAddress);
+                      
+                      // 1. Unlock in the moduleProgress subcollection
+                      const moduleProgressRef = doc(collection(userProgressRef, 'moduleProgress'), 'objects-ownership');
+                      
+                      await setDoc(moduleProgressRef, {
+                        moduleId: 'objects-ownership',
+                        completed: false,
+                        locked: false,
+                        completedLessons: [],
+                        lastAccessed: serverTimestamp()
+                      }, { merge: true });
+                      
+                      // 2. Update the galaxies data to unlock galaxy 2 if needed
+                      await updateDoc(userProgressRef, {
+                        unlockedGalaxies: arrayUnion(2),
+                        lastActivityTimestamp: serverTimestamp()
+                      });
+                      
+                      // 3. Force set objects-ownership in completedModules array if needed
+                      const userDoc = await getDoc(userProgressRef);
+                      if (userDoc.exists()) {
+                        const userData = userDoc.data();
+                        if (userData.completedModules && !userData.completedModules.includes('move-language')) {
+                          await updateDoc(userProgressRef, {
+                            completedModules: arrayUnion('move-language'),
+                            lastActivityTimestamp: serverTimestamp()
+                          });
+                        }
+                      }
+                      
+                      // 4. Update UI state
+                      setGalaxies(prevGalaxies => {
+                        return prevGalaxies.map(galaxy => ({
+                          ...galaxy,
+                          unlocked: galaxy.id <= 2 ? true : galaxy.unlocked,
+                          modules: galaxy.modules.map(module => ({
+                            ...module,
+                            locked: module.id === 'objects-ownership' ? false : module.locked
+                          }))
+                        }));
+                      });
+                      
+                      // 5. Force a complete refresh of data
+                      setTimeout(() => {
+                        refreshProgressData();
+                      }, 500);
+                      
+                      toast({
+                        title: "Module Unlocked",
+                        description: "Successfully unlocked Objects & Ownership module!",
+                        duration: 3000,
+                      });
+                    } catch (error) {
+                      logger.error('[EMERGENCY FIX] Error in manual unlock:', error);
+                      toast({
+                        title: "Error",
+                        description: "Failed to unlock module. Please try again.",
+                        variant: "destructive",
+                        duration: 3000,
+                      });
+                    }
+                  }}
+                  variant="outline"
+                  className="bg-orange-500/10 hover:bg-orange-500/20 text-orange-500 border-orange-500/30"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Force Unlock Objects & Ownership Module
+                </Button>
+              </div>
+              
               <div className="flex flex-col md:flex-row justify-center items-center gap-8 mb-6">
                 <div className="bg-card/40 backdrop-blur-sm rounded-lg p-4 flex items-center gap-4 w-full md:w-auto">
                   <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
                     <Star className="h-6 w-6 text-primary" />
-                  </div>
+              </div>
                   <div>
                     <h3 className="text-sm text-foreground/70">Overall Progress</h3>
                     <p className="text-2xl font-bold">{userProgress.overallProgress}%</p>
-                  </div>
-                </div>
-                
+              </div>
+            </div>
+            
                 <div className="bg-card/40 backdrop-blur-sm rounded-lg p-4 flex items-center gap-4 w-full md:w-auto">
                   <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center">
                     <Circle className="h-6 w-6 text-cyan-500" />
-                  </div>
+              </div>
                   <div>
                     <h3 className="text-sm text-foreground/70">Current Galaxy</h3>
                     <p className="text-2xl font-bold">{galaxies.find(g => g.current)?.name || 'Genesis Galaxy'}</p>
-                  </div>
-                </div>
-                
+              </div>
+            </div>
+            
                 <div className="bg-card/40 backdrop-blur-sm rounded-lg p-4 flex items-center gap-4 w-full md:w-auto">
                   <div className="w-12 h-12 rounded-full bg-purple-500/20 flex items-center justify-center">
                     <Trophy className="h-6 w-6 text-purple-500" />
-                  </div>
+              </div>
                   <div>
                     <h3 className="text-sm text-foreground/70">Modules Completed</h3>
                     <p className="text-2xl font-bold">
                       {userProgress.totalModulesCompleted}/{userProgress.totalModules}
                     </p>
-                  </div>
-                </div>
+              </div>
+            </div>
               </div>
               
               <div className="galaxy-card p-1 relative">
@@ -1742,50 +2604,50 @@ const Learning = () => {
                   onMouseLeave={handleMouseUp}
                   ref={mapContainerRef}
                 >
-                  <div className="absolute top-4 right-4 z-10 flex space-x-2 bg-card/60 rounded-lg p-1.5 backdrop-blur-sm">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 rounded-full"
-                      onClick={() => handleZoom('in')}
-                    >
-                      <ZoomIn className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 rounded-full"
-                      onClick={() => handleZoom('out')}
-                    >
-                      <ZoomOut className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 rounded-full"
-                      onClick={resetView}
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  
-                  <div 
-                    className="absolute"
-                    style={{
-                      transform: `translate(${mapPosition.x}px, ${mapPosition.y}px) scale(${zoomLevel})`,
-                      width: '5000px',
-                      height: '3000px',
-                      transformOrigin: 'center',
-                    }}
-                  >
-                    <LearningPathMap 
-                      galaxies={galaxies as Galaxy[]} 
-                      currentGalaxy={currentGalaxy}
-                      currentModuleId={currentModuleId}
-                      rocketPosition={rocketPosition}
-                    />
-                  </div>
-                </div>
+                    <div className="absolute top-4 right-4 z-10 flex space-x-2 bg-card/60 rounded-lg p-1.5 backdrop-blur-sm">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 rounded-full"
+                        onClick={() => handleZoom('in')}
+                      >
+                        <ZoomIn className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 rounded-full"
+                        onClick={() => handleZoom('out')}
+                      >
+                        <ZoomOut className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 rounded-full"
+                        onClick={resetView}
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                      <div 
+                        className="absolute"
+                        style={{
+                          transform: `translate(${mapPosition.x}px, ${mapPosition.y}px) scale(${zoomLevel})`,
+                          width: '5000px',
+                          height: '3000px',
+                          transformOrigin: 'center',
+                        }}
+                      >
+                        <LearningPathMap 
+                          galaxies={galaxies as Galaxy[]} 
+                          currentGalaxy={currentGalaxy}
+                          currentModuleId={currentModuleId}
+                          rocketPosition={rocketPosition}
+                        />
+                      </div>
+                    </div>
               </div>
               
               {/* Daily Challenges Section */}
@@ -1814,114 +2676,151 @@ const Learning = () => {
                 
                 {/* Module cards grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {galaxies.find(g => g.current)?.modules.map((module) => (
-                    <motion.div
-                      key={module.id}
-                      className={`galaxy-card border ${module.locked ? 'border-muted/30' : module.completed ? 'border-green-500/20' : 'border-primary/20'} p-4 rounded-lg relative overflow-hidden`}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      whileHover={!module.locked ? { scale: 1.02 } : {}}
-                      transition={{ duration: 0.2 }}
-                      onClick={() => !module.locked && handleStartModule(module.id)}
-                    >
-                      {/* Module background effect */}
-                      <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/10 opacity-50"></div>
-                      
-                      {/* Lock indicator for locked modules */}
-                      {module.locked && (
-                        <div className="absolute top-3 right-3 bg-yellow-500/20 text-yellow-500 p-1 rounded">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                          </svg>
-                        </div>
-                      )}
-                      
-                      {/* Completion indicator */}
-                      {module.completed && (
-                        <div className="absolute top-3 right-3 bg-green-500/20 text-green-500 p-1 rounded-full">
-                          <CheckCircle className="h-4 w-4" />
-                        </div>
-                      )}
-                      
-                      {/* Module icon */}
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${
-                        module.locked 
-                          ? 'bg-muted/20' 
-                          : module.completed
-                            ? 'bg-green-500/20'
-                            : module.type === 'planet' 
-                              ? 'bg-blue-500/20' 
-                              : module.type === 'moon' 
-                                ? 'bg-purple-500/20' 
-                                : module.type === 'asteroid' 
-                                  ? 'bg-orange-500/20' 
-                                  : module.type === 'station' 
-                                    ? 'bg-green-500/20' 
-                                    : 'bg-primary/20'
-                      }`}>
-                        {module.type === 'planet' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-blue-500'}`} />}
-                        {module.type === 'moon' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-purple-500'}`} />}
-                        {module.type === 'asteroid' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-orange-500'}`} />}
-                        {module.type === 'station' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-green-500'}`} />}
-                        {module.type === 'earth' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-cyan-500'}`} />}
-                      </div>
-                      
-                      <div className="relative z-10">
-                        <h3 className={`font-bold text-lg mb-1 ${module.locked ? 'text-foreground/50' : ''}`}>
-                          {module.title}
-                        </h3>
+                  {sortGalaxies(galaxies).find(g => g.current)?.modules.map((module, moduleIndex, allModules) => {
+                    // Determine if this module should be locked using the proper logic
+                    let isLocked = module.locked;
+                    
+                    // Within each galaxy, if the previous module is completed, this one should be unlocked
+                    if (moduleIndex > 0) {
+                      const prevModule = allModules[moduleIndex - 1];
+                      if (prevModule && (prevModule.completed || completedModules.includes(prevModule.id))) {
+                        isLocked = false;
+                      }
+                    }
+                    
+                    // First module in the current galaxy should always be unlocked
+                    if (moduleIndex === 0) {
+                      isLocked = false;
+                    }
+                    
+                    // Special handling for Objects & Ownership module
+                    if (module.id === 'objects-ownership') {
+                      // Check if Move Language is completed
+                      const moveLanguageModule = allModules.find(m => m.id === 'move-language');
+                      if (moveLanguageModule && (moveLanguageModule.completed || completedModules.includes('move-language'))) {
+                        isLocked = false;
+                      }
+                    }
+                    
+                    // Current module should never be locked
+                    if (module.id === currentModuleId) {
+                      isLocked = false;
+                    }
+                    
+                    // Completed modules should never be locked
+                    if (completedModules.includes(module.id)) {
+                      isLocked = false;
+                    }
+                    
+                    return (
+              <motion.div 
+                        key={module.id}
+                        className={`galaxy-card border ${isLocked ? 'border-muted/30' : module.completed ? 'border-green-500/20' : 'border-primary/20'} p-4 rounded-lg relative overflow-hidden`}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                        whileHover={!isLocked ? { scale: 1.02 } : {}}
+                        transition={{ duration: 0.2 }}
+                        onClick={() => !isLocked && handleStartModule(module.id)}
+                      >
+                        {/* Module background effect */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/10 opacity-50"></div>
                         
-                        <p className={`text-sm mb-4 line-clamp-2 h-10 ${module.locked ? 'text-foreground/40' : 'text-foreground/70'}`}>
-                          {module.description}
-                        </p>
-                        
-                        {/* Progress indicator for ongoing modules */}
-                        {!module.locked && !module.completed && (
-                          <div className="mb-3">
-                            <div className="flex justify-between text-xs mb-1">
-                              <span>Progress</span>
-                              <span>{calculateModuleProgress(module)}%</span>
-                            </div>
-                            <Progress value={calculateModuleProgress(module)} className="h-1.5" />
-                          </div>
+                        {/* Lock indicator for locked modules */}
+                        {isLocked && (
+                          <div className="absolute top-3 right-3 bg-yellow-500/20 text-yellow-500 p-1 rounded">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+                              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            </svg>
+                        </div>
                         )}
                         
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center space-x-2">
-                            <div className="flex items-center">
-                              <Star className="h-3.5 w-3.5 text-yellow-500 mr-1" />
-                              <span className="text-xs">{module.xpReward || 100} XP</span>
+                        {/* Completion indicator */}
+                        {module.completed && (
+                          <div className="absolute top-3 right-3 bg-green-500/20 text-green-500 p-1 rounded-full">
+                            <CheckCircle className="h-4 w-4" />
                             </div>
+                        )}
+                        
+                        {/* Module icon */}
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${
+                          isLocked 
+                            ? 'bg-muted/20' 
+                            : module.completed
+                              ? 'bg-green-500/20'
+                              : module.type === 'planet' 
+                                ? 'bg-blue-500/20' 
+                                : module.type === 'moon' 
+                                  ? 'bg-purple-500/20' 
+                                  : module.type === 'asteroid' 
+                                    ? 'bg-orange-500/20' 
+                                    : module.type === 'station' 
+                                      ? 'bg-green-500/20' 
+                                      : 'bg-primary/20'
+                        }`}>
+                          {module.type === 'planet' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-blue-500'}`} />}
+                          {module.type === 'moon' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-purple-500'}`} />}
+                          {module.type === 'asteroid' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-orange-500'}`} />}
+                          {module.type === 'station' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-green-500'}`} />}
+                          {module.type === 'earth' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-cyan-500'}`} />}
                           </div>
                           
-                          <Button
-                            size="sm"
-                            className={`h-8 ${
-                              module.locked 
-                                ? 'bg-muted/20 text-foreground/40 cursor-not-allowed' 
-                                : module.completed 
-                                  ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' 
-                                  : module.current 
-                                    ? 'bg-primary/80 text-white hover:bg-primary/90'
-                                    : 'neon-button'
-                            }`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!module.locked) handleStartModule(module.id);
-                            }}
-                            disabled={module.locked}
-                          >
-                            {module.locked ? 'Locked' : module.completed ? 'Completed' : module.current ? 'Continue' : 'Start'}
-                          </Button>
+                        <div className="relative z-10">
+                          <h3 className={`font-bold text-lg mb-1 ${isLocked ? 'text-foreground/50' : ''}`}>
+                            {module.title}
+                          </h3>
+                          
+                          <p className={`text-sm mb-4 line-clamp-2 h-10 ${isLocked ? 'text-foreground/40' : 'text-foreground/70'}`}>
+                            {module.description}
+                          </p>
+                          
+                          {/* Progress indicator for ongoing modules */}
+                          {!isLocked && !module.completed && (
+                            <div className="mb-3">
+                              <div className="flex justify-between text-xs mb-1">
+                                <span>Progress</span>
+                                <span>{calculateModuleProgress(module)}%</span>
+                            </div>
+                              <Progress value={calculateModuleProgress(module)} className="h-1.5" />
+                          </div>
+                          )}
+                          
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center space-x-2">
+                              <div className="flex items-center">
+                                <Star className="h-3.5 w-3.5 text-yellow-500 mr-1" />
+                                <span className="text-xs">{module.xpReward || 100} XP</span>
                         </div>
                       </div>
-                    </motion.div>
-                  ))}
-                </div>
+                      
+                        <Button 
+                              size="sm"
+                              className={`h-8 ${
+                                isLocked 
+                                  ? 'bg-muted/20 text-foreground/40 cursor-not-allowed' 
+                                  : module.completed 
+                                    ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' 
+                                    : module.current 
+                                      ? 'bg-primary/80 text-white hover:bg-primary/90'
+                                      : 'neon-button'
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!isLocked) handleStartModule(module.id);
+                              }}
+                              disabled={isLocked}
+                            >
+                              {isLocked ? 'Locked' : module.completed ? 'Completed' : module.current ? 'Continue' : 'Start'}
+                        </Button>
+                      </div>
+                    </div>
+                      </motion.div>
+                    );
+                  })}
+                    </div>
                 
-                {/* Show all available galaxies */}
-                {galaxies.filter(g => !g.current).map((galaxy) => (
+                {/* Show all available galaxies - sorted with completed galaxies at the end */}
+                {sortGalaxies(galaxies).filter(g => !g.current).map((galaxy) => (
                   <div key={`galaxy-${galaxy.id}`} className="mt-8">
                     <div className={`bg-card/40 backdrop-blur-sm rounded-lg p-4 mb-6 ${!galaxy.unlocked ? 'opacity-60' : galaxy.current ? 'border-l-4 border-primary' : ''}`}>
                       <h3 className="text-lg font-bold flex items-center">
@@ -1944,120 +2843,157 @@ const Learning = () => {
                             <span className="font-medium">
                               {galaxy.modules.filter(m => m.completed).length}/{galaxy.modules.length} modules
                             </span>
-                          </div>
+                </div>
                         )}
                       </div>
-                    </div>
-                    
+          </div>
+          
                     {galaxy.unlocked && (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {galaxy.modules.map((module) => (
-                          <motion.div
-                            key={module.id}
-                            className={`galaxy-card border ${module.locked ? 'border-muted/30' : module.completed ? 'border-green-500/20' : 'border-primary/20'} p-4 rounded-lg relative overflow-hidden`}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            whileHover={!module.locked ? { scale: 1.02 } : {}}
-                            transition={{ duration: 0.2 }}
-                            onClick={() => !module.locked && handleStartModule(module.id)}
-                          >
-                            {/* Module background effect */}
-                            <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/10 opacity-50"></div>
-                            
-                            {/* Lock indicator for locked modules */}
-                            {module.locked && (
-                              <div className="absolute top-3 right-3 bg-yellow-500/20 text-yellow-500 p-1 rounded">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
-                                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                                </svg>
-                              </div>
-                            )}
-                            
-                            {/* Completion indicator */}
-                            {module.completed && (
-                              <div className="absolute top-3 right-3 bg-green-500/20 text-green-500 p-1 rounded-full">
-                                <CheckCircle className="h-4 w-4" />
-                              </div>
-                            )}
-                            
-                            {/* Module icon */}
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${
-                              module.locked 
-                                ? 'bg-muted/20' 
-                                : module.completed
-                                  ? 'bg-green-500/20'
-                                  : module.type === 'planet' 
-                                    ? 'bg-blue-500/20' 
-                                    : module.type === 'moon' 
-                                      ? 'bg-purple-500/20' 
-                                      : module.type === 'asteroid' 
-                                        ? 'bg-orange-500/20' 
-                                        : module.type === 'station' 
-                                          ? 'bg-green-500/20' 
-                                          : 'bg-primary/20'
-                            }`}>
-                              {module.type === 'planet' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-blue-500'}`} />}
-                              {module.type === 'moon' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-purple-500'}`} />}
-                              {module.type === 'asteroid' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-orange-500'}`} />}
-                              {module.type === 'station' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-green-500'}`} />}
-                              {module.type === 'earth' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-cyan-500'}`} />}
-                            </div>
-                            
-                            <div className="relative z-10">
-                              <h3 className={`font-bold text-lg mb-1 ${module.locked ? 'text-foreground/50' : ''}`}>
-                                {module.title}
-                              </h3>
+                        {galaxy.modules.map((module, moduleIndex, allModules) => {
+                          // Determine if this module should be locked using the proper logic
+                          let isLocked = module.locked;
+                          
+                          // Within each galaxy, if the previous module is completed, this one should be unlocked
+                          if (moduleIndex > 0) {
+                            const prevModule = allModules[moduleIndex - 1];
+                            if (prevModule && (prevModule.completed || completedModules.includes(prevModule.id))) {
+                              isLocked = false;
+                            }
+                          }
+                          
+                          // First module in an unlocked galaxy should always be unlocked
+                          if (moduleIndex === 0 && galaxy.unlocked) {
+                            isLocked = false;
+                          }
+                          
+                          // Special handling for Objects & Ownership module
+                          if (module.id === 'objects-ownership') {
+                            // Check if Move Language is completed
+                            const moveLanguageModule = allModules.find(m => m.id === 'move-language');
+                            if (moveLanguageModule && (moveLanguageModule.completed || completedModules.includes('move-language'))) {
+                              isLocked = false;
+                            }
+                          }
+                          
+                          // Current module should never be locked
+                          if (module.id === currentModuleId) {
+                            isLocked = false;
+                          }
+                          
+                          // Completed modules should never be locked
+                          if (completedModules.includes(module.id)) {
+                            isLocked = false;
+                          }
+                          
+                          return (
+            <motion.div
+                              key={module.id}
+                              className={`galaxy-card border ${isLocked ? 'border-muted/30' : module.completed ? 'border-green-500/20' : 'border-primary/20'} p-4 rounded-lg relative overflow-hidden`}
+                              initial={{ opacity: 0, y: 20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              whileHover={!isLocked ? { scale: 1.02 } : {}}
+                              transition={{ duration: 0.2 }}
+                              onClick={() => !isLocked && handleStartModule(module.id)}
+                            >
+                              {/* Module background effect */}
+                              <div className="absolute inset-0 bg-gradient-to-br from-transparent to-black/10 opacity-50"></div>
                               
-                              <p className={`text-sm mb-4 line-clamp-2 h-10 ${module.locked ? 'text-foreground/40' : 'text-foreground/70'}`}>
-                                {module.description}
-                              </p>
-                              
-                              {/* Progress indicator for ongoing modules */}
-                              {!module.locked && !module.completed && (
-                                <div className="mb-3">
-                                  <div className="flex justify-between text-xs mb-1">
-                                    <span>Progress</span>
-                                    <span>{calculateModuleProgress(module)}%</span>
-                                  </div>
-                                  <Progress value={calculateModuleProgress(module)} className="h-1.5" />
-                                </div>
+                              {/* Lock indicator for locked modules */}
+                              {isLocked && (
+                                <div className="absolute top-3 right-3 bg-yellow-500/20 text-yellow-500 p-1 rounded">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                  </svg>
+              </div>
                               )}
                               
-                              <div className="flex justify-between items-center">
-                                <div className="flex items-center space-x-2">
-                                  <div className="flex items-center">
-                                    <Star className="h-3.5 w-3.5 text-yellow-500 mr-1" />
-                                    <span className="text-xs">{module.xpReward || 100} XP</span>
-                                  </div>
-                                </div>
-                                
-                                <Button
-                                  size="sm"
-                                  className={`h-8 ${
-                                    module.locked 
-                                      ? 'bg-muted/20 text-foreground/40 cursor-not-allowed' 
-                                      : module.completed 
-                                        ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' 
-                                        : module.current 
-                                          ? 'bg-primary/80 text-white hover:bg-primary/90'
-                                          : 'neon-button'
-                                  }`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!module.locked) handleStartModule(module.id);
-                                  }}
-                                  disabled={module.locked}
-                                >
-                                  {module.locked ? 'Locked' : module.completed ? 'Completed' : module.current ? 'Continue' : 'Start'}
-                                </Button>
-                              </div>
-                            </div>
-                          </motion.div>
-                        ))}
+                              {/* Completion indicator */}
+                              {module.completed && (
+                                <div className="absolute top-3 right-3 bg-green-500/20 text-green-500 p-1 rounded-full">
+                                  <CheckCircle className="h-4 w-4" />
                       </div>
+                              )}
+                              
+                              {/* Module icon */}
+                              <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${
+                                isLocked 
+                                  ? 'bg-muted/20' 
+                                  : module.completed
+                                    ? 'bg-green-500/20'
+                                    : module.type === 'planet' 
+                                      ? 'bg-blue-500/20' 
+                                      : module.type === 'moon' 
+                                        ? 'bg-purple-500/20' 
+                                        : module.type === 'asteroid' 
+                                          ? 'bg-orange-500/20' 
+                                          : module.type === 'station' 
+                                            ? 'bg-green-500/20' 
+                                            : 'bg-primary/20'
+                              }`}>
+                                {module.type === 'planet' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-blue-500'}`} />}
+                                {module.type === 'moon' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-purple-500'}`} />}
+                                {module.type === 'asteroid' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-orange-500'}`} />}
+                                {module.type === 'station' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-green-500'}`} />}
+                                {module.type === 'earth' && <Circle className={`h-6 w-6 ${module.completed ? 'text-green-500' : 'text-cyan-500'}`} />}
+                              </div>
+                              
+                              <div className="relative z-10">
+                                <h3 className={`font-bold text-lg mb-1 ${isLocked ? 'text-foreground/50' : ''}`}>
+                                  {module.title}
+                                </h3>
+                                
+                                <p className={`text-sm mb-4 line-clamp-2 h-10 ${isLocked ? 'text-foreground/40' : 'text-foreground/70'}`}>
+                                  {module.description}
+                                </p>
+                                
+                                {/* Progress indicator for ongoing modules */}
+                                {!isLocked && !module.completed && (
+                                  <div className="mb-3">
+                                    <div className="flex justify-between text-xs mb-1">
+                                      <span>Progress</span>
+                                      <span>{calculateModuleProgress(module)}%</span>
+                                    </div>
+                                    <Progress value={calculateModuleProgress(module)} className="h-1.5" />
+                                  </div>
+                                )}
+                                
+                                <div className="flex justify-between items-center">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="flex items-center">
+                                      <Star className="h-3.5 w-3.5 text-yellow-500 mr-1" />
+                                      <span className="text-xs">{module.xpReward || 100} XP</span>
+                                    </div>
+                                  </div>
+                                  
+                                  <Button
+                                    size="sm"
+                                    className={`h-8 ${
+                                      isLocked 
+                                        ? 'bg-muted/20 text-foreground/40 cursor-not-allowed' 
+                                        : module.completed 
+                                          ? 'bg-green-500/20 text-green-500 hover:bg-green-500/30' 
+                                          : module.current 
+                                            ? 'bg-primary/80 text-white hover:bg-primary/90'
+                                            : 'neon-button'
+                                    }`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isLocked) handleStartModule(module.id);
+                                    }}
+                                    disabled={isLocked}
+                                  >
+                                    {isLocked ? 'Locked' : module.completed ? 'Completed' : module.current ? 'Continue' : 'Start'}
+                                  </Button>
+                                </div>
+                              </div>
+            </motion.div>
+                          );
+                        })}
+          </div>
                     )}
-                  </div>
+        </div>
                 ))}
               </div>
             </div>
@@ -2322,8 +3258,106 @@ const Learning = () => {
             >
               Force Complete Current Module
             </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs bg-purple-500/10"
+              onClick={async () => {
+                try {
+                  // Check if Move Language is completed
+                  const moveLanguageCompleted = completedModules.includes('move-language');
+                  
+                  // Find Galaxy 2 (Explorer Galaxy)
+                  const explorerGalaxy = galaxies.find(g => g.id === 2);
+                  
+                  // Find Objects & Ownership module
+                  const objectsOwnershipModule = explorerGalaxy?.modules.find(m => m.id === 'objects-ownership');
+                  
+                  toast({
+                    title: "Objects & Ownership Check",
+                    description: `Move Language completed: ${moveLanguageCompleted}\nObjects & Ownership locked: ${objectsOwnershipModule?.locked}`,
+                    duration: 4000,
+                  });
+                  
+                  // If Move Language is completed but Objects & Ownership is still locked, fix it
+                  if (moveLanguageCompleted && objectsOwnershipModule?.locked && walletAddress) {
+                    toast({
+                      title: "Fixing Module Status",
+                      description: "Unlocking Objects & Ownership module...",
+                      duration: 3000,
+                    });
+                    
+                    // Update in Firestore
+                    const userProgressRef = doc(db, 'learningProgress', walletAddress);
+                    const objectsOwnershipRef = doc(collection(userProgressRef, 'moduleProgress'), 'objects-ownership');
+                    
+                    await setDoc(objectsOwnershipRef, {
+                      moduleId: 'objects-ownership',
+                      completed: false,
+                      locked: false,
+                      completedLessons: [],
+                      lastAccessed: serverTimestamp()
+                    }, { merge: true });
+                    
+                    // Update UI
+                    setGalaxies(prevGalaxies => {
+                      return prevGalaxies.map(galaxy => {
+                        if (galaxy.id === 2) {
+                          return {
+                            ...galaxy,
+                            modules: galaxy.modules.map(module => {
+                              if (module.id === 'objects-ownership') {
+                                return { ...module, locked: false };
+                              }
+                              return module;
+                            })
+                          };
+                        }
+                        return galaxy;
+                      });
+                    });
+                    
+                    toast({
+                      title: "Module Unlocked",
+                      description: "Objects & Ownership module has been unlocked",
+                      duration: 3000,
+                    });
+                    
+                    // Refresh data
+                    setTimeout(() => {
+                      refreshProgressData();
+                    }, 500);
+                  }
+                } catch (err) {
+                  logger.error('[Debug] Error checking Objects & Ownership module:', err);
+                  toast({
+                    title: "Error",
+                    description: "Failed to check module status",
+                    variant: "destructive",
+                    duration: 3000,
+                  });
+                }
+              }}
+            >
+              Check Objects & Ownership
+            </Button>
           </div>
           <p className="text-xs mt-2 text-yellow-500">These tools are for debugging only</p>
+        </div>
+      )}
+
+      {/* Add a small link to the admin page */}
+      {process.env.NODE_ENV !== 'production' && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <Button 
+            variant="outline" 
+            size="sm"
+            className="text-xs bg-black/30 backdrop-blur-md border-primary/30 hover:bg-primary/20"
+            onClick={() => navigate('/admin')}
+          >
+            Admin
+          </Button>
         </div>
       )}
     </div>
