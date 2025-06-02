@@ -13,12 +13,16 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase-config';
 import logger from '@/utils/logger';
+import { defaultNetwork } from '@/lib/sui-config';
 
-// Smart contract details
-const PACKAGE_ID = '0x3113324e84c22ce4925d642f2c2ead709a8a8aaf0928cd23873ddec6f31a1440';
+// Smart contract details - using testnet package by default
+// This should be the deployed package ID on testnet for the NFT contract
+const PACKAGE_ID = import.meta.env.VITE_NFT_PACKAGE_ID || '0x3113324e84c22ce4925d642f2c2ead709a8a8aaf0928cd23873ddec6f31a1440';
+const MODULE_NAME = 'academy_nfts';
+const FUNCTION_NAME = 'mint_achievement_nft_open';
 
 // Initialize Sui client - use testnet by default
-const network = import.meta.env.VITE_SUI_NETWORK || 'testnet';
+const network = import.meta.env.VITE_SUI_NETWORK || defaultNetwork || 'testnet';
 const suiClient = new SuiClient({ url: getFullnodeUrl(network) });
 
 // Helper function to get fullnode URL
@@ -68,6 +72,7 @@ export const createNFTMintingTransaction = (
   moduleId: number | string
 ): TransactionBlock => {
   logger.log(`[NFT] Creating transaction block for module ${moduleId}, recipient: ${recipientAddress}`);
+  logger.log(`[NFT] Using network: ${network}, package ID: ${PACKAGE_ID}`);
   
   // Convert moduleId to a number if it's a string
   const moduleIdNumber = typeof moduleId === 'string' ? 
@@ -88,25 +93,33 @@ export const createNFTMintingTransaction = (
   const imageUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=module${safeModuleId}`;
   
   logger.log(`[NFT] Module data: ${moduleData.name}, image URL: ${imageUrl}`);
-  logger.log(`[NFT] Using contract: ${PACKAGE_ID}`);
+  logger.log(`[NFT] Using contract: ${PACKAGE_ID}::${MODULE_NAME}::${FUNCTION_NAME}`);
   
   // Create a new transaction block
   const tx = new TransactionBlock();
   
-  // Add the NFT minting transaction using the open minting function
-  tx.moveCall({
-    target: `${PACKAGE_ID}::academy_nfts::mint_achievement_nft_open`,
-    arguments: [
-      tx.pure(recipientAddress),
-      tx.pure(safeModuleId), // Use the safe numeric moduleId
-      tx.pure(moduleData.name),
-      tx.pure(moduleData.description),
-      tx.pure(imageUrl)
-    ]
-  });
-
-  logger.log(`[NFT] Transaction block created successfully`);
-  return tx;
+  try {
+    // Add the NFT minting transaction using the open minting function
+    tx.moveCall({
+      target: `${PACKAGE_ID}::${MODULE_NAME}::${FUNCTION_NAME}`,
+      arguments: [
+        tx.pure(recipientAddress),
+        tx.pure(safeModuleId), // Use the safe numeric moduleId
+        tx.pure(moduleData.name),
+        tx.pure(moduleData.description),
+        tx.pure(imageUrl)
+      ]
+    });
+    
+    // Set gas budget to ensure transaction doesn't fail due to gas issues
+    tx.setGasBudget(30000000);
+    
+    logger.log(`[NFT] Transaction block created successfully`);
+    return tx;
+  } catch (error) {
+    logger.error(`[NFT] Error creating transaction block:`, error);
+    throw error;
+  }
 };
 
 /**
@@ -258,6 +271,12 @@ export const hasModuleNFT = async (walletAddress: string, moduleId: number | str
   try {
     logger.log(`[NFT] Checking if user ${walletAddress} has NFT for module ${moduleId}`);
     
+    // Skip check for test wallets
+    if (walletAddress === 'test-wallet' || !walletAddress) {
+      logger.log('[NFT] Test wallet or empty address detected, returning false');
+      return false;
+    }
+    
     // Convert moduleId to a number if it's a string
     const moduleIdNumber = typeof moduleId === 'string' ? 
       parseInt(moduleId.replace(/[^0-9]/g, '')) || 1 : moduleId;
@@ -273,12 +292,15 @@ export const hasModuleNFT = async (walletAddress: string, moduleId: number | str
       where('moduleId', '==', safeModuleId)
     );
     
+    logger.log(`[NFT] Querying Firestore for NFT with moduleId ${safeModuleId} and wallet ${walletAddress}`);
     const querySnapshot = await getDocs(q);
     
     if (!querySnapshot.empty) {
-      logger.log(`[NFT] Found existing NFT in Firestore for module ${safeModuleId}`);
+      logger.log(`[NFT] Found existing NFT in Firestore for module ${safeModuleId}, count: ${querySnapshot.size}`);
       return true;
     }
+    
+    logger.log(`[NFT] No NFT found in Firestore for module ${safeModuleId}`);
     
     // If not found in Firestore, return false
     return false;

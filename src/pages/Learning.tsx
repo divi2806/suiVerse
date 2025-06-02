@@ -40,6 +40,8 @@ import { rewardUser } from '@/services/userRewardsService';
 import './learning.css';
 import { Progress } from "@/components/ui/progress";
 import logger from '@/utils/logger';
+import { XP_REWARDS } from '@/constants/xpRewards';
+import GraduationPopup from '@/components/GraduationPopup';
 
 // Define interfaces that match the ones in LearningPathMap
 interface Module {
@@ -137,6 +139,10 @@ const Learning = () => {
   
   // Map interaction state
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  
+  // Graduation popup state
+  const [showGraduationPopup, setShowGraduationPopup] = useState(false);
+  const [finalModuleId, setFinalModuleId] = useState<string | null>(null);
   
   // Sort galaxies to show completed ones at the end
   const sortGalaxiesByCompletion = useCallback((galaxiesToSort: GalaxyType[]): GalaxyType[] => {
@@ -1472,8 +1478,8 @@ const Learning = () => {
       await updateDoc(userProgressRef, {
         completedModules: arrayUnion(currentMod),
         currentModuleId: nextMod,
-        totalXpEarned: increment(200), // Add some XP
-        xp: increment(200),
+        totalXpEarned: increment(XP_REWARDS.COMPLETE_MODULE), // Add XP from constant
+        xp: increment(XP_REWARDS.COMPLETE_MODULE),
         lastUpdated: serverTimestamp()
       });
       
@@ -1505,7 +1511,7 @@ const Learning = () => {
       
       toast({
         title: "Module Completed",
-        description: `XP: 200, SUI: ${suiAmount}, Rocket position updated`,
+        description: `XP: ${XP_REWARDS.COMPLETE_MODULE}, SUI: ${suiAmount}, Rocket position updated`,
         duration: 3000,
       });
       
@@ -1581,6 +1587,35 @@ const Learning = () => {
     }
   }, [galaxies, walletAddress]);
   
+  // Function to check if a module is the final module
+  const isFinalModule = useCallback((moduleId: string): boolean => {
+    // Find the last galaxy
+    const sortedGalaxies = [...galaxies].sort((a, b) => b.id - a.id);
+    if (sortedGalaxies.length === 0) return false;
+    
+    const lastGalaxy = sortedGalaxies[0];
+    if (!lastGalaxy || lastGalaxy.modules.length === 0) return false;
+    
+    // Get the last module in the last galaxy
+    const lastModule = [...lastGalaxy.modules].sort((a, b) => {
+      // Try to extract module numbers for comparison
+      const aMatch = a.id.match(/(\d+)$/);
+      const bMatch = b.id.match(/(\d+)$/);
+      
+      if (aMatch && bMatch) {
+        return parseInt(bMatch[1], 10) - parseInt(aMatch[1], 10);
+      }
+      
+      // If we can't extract numbers, compare the IDs as strings
+      return a.id.localeCompare(b.id);
+    })[0];
+    
+    if (!lastModule) return false;
+    
+    // Check if this is the final module
+    return moduleId === lastModule.id;
+  }, [galaxies]);
+
   // Listen for module completion events from other components
   useEffect(() => {
     const handleModuleCompletion = (event: CustomEvent) => {
@@ -1591,6 +1626,12 @@ const Learning = () => {
       if (eventWalletAddress !== walletAddress) return;
       
       logger.log('[Learning] Module completion event received:', event.detail);
+      
+      // Check if this is the final module
+      if (isFinalModule(moduleId)) {
+        logger.log('[Learning] Final module completed! Showing graduation popup');
+        setShowGraduationPopup(true);
+      }
       
       toast({
         title: "Module Completed!",
@@ -1925,7 +1966,7 @@ const Learning = () => {
       document.removeEventListener('moduleCompleted', handleModuleCompletion as EventListener);
       document.removeEventListener('galaxyUnlocked', handleGalaxyUnlock as EventListener);
     };
-  }, [walletAddress, completedModules, refreshProgressData, toast, updateRocketPosition]);
+  }, [walletAddress, completedModules, refreshProgressData, toast, updateRocketPosition, isFinalModule]);
 
   // Helper functions for XP and level calculations
   const calculateLevel = (xp: number): number => {
@@ -2789,7 +2830,7 @@ const Learning = () => {
                             <div className="flex items-center space-x-2">
                               <div className="flex items-center">
                                 <Star className="h-3.5 w-3.5 text-yellow-500 mr-1" />
-                                <span className="text-xs">{module.xpReward || 100} XP</span>
+                                <span className="text-xs">{XP_REWARDS.COMPLETE_MODULE} XP</span>
                         </div>
                       </div>
                       
@@ -2963,7 +3004,7 @@ const Learning = () => {
                                   <div className="flex items-center space-x-2">
                                     <div className="flex items-center">
                                       <Star className="h-3.5 w-3.5 text-yellow-500 mr-1" />
-                                      <span className="text-xs">{module.xpReward || 100} XP</span>
+                                      <span className="text-xs">{XP_REWARDS.COMPLETE_MODULE} XP</span>
                                     </div>
                                   </div>
                                   
@@ -3342,6 +3383,126 @@ const Learning = () => {
             >
               Check Objects & Ownership
             </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs bg-yellow-500/10"
+              onClick={() => {
+                // Test the graduation popup
+                setShowGraduationPopup(true);
+                toast({
+                  title: "Test Graduation",
+                  description: "Showing graduation popup",
+                  duration: 2000,
+                });
+              }}
+            >
+              Test Graduation Popup
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs bg-pink-500/10"
+              onClick={async () => {
+                try {
+                  // Check if wallet is connected
+                  if (!walletAddress) {
+                    toast({
+                      title: "Wallet Not Connected",
+                      description: "Please connect your wallet to mint NFTs",
+                      variant: "destructive",
+                      duration: 3000,
+                    });
+                    return;
+                  }
+                  
+                  // Use module 2 for testing
+                  const moduleNumber = 2;
+                  
+                  toast({
+                    title: "Test NFT Mint",
+                    description: `Creating NFT mint transaction for module ${moduleNumber}...`,
+                    duration: 3000,
+                  });
+                  
+                  logger.log(`[Test NFT Mint] Creating transaction for module ${moduleNumber}, wallet ${walletAddress}`);
+                  
+                  // Import the NFT service functions
+                  const { mintModuleCompletionNFT } = await import('@/services/nftService');
+                  
+                  // Create the NFT mint transaction
+                  const result = await mintModuleCompletionNFT(walletAddress, moduleNumber);
+                  
+                  if (result.success) {
+                    if (result.transaction) {
+                      toast({
+                        title: "NFT Transaction Created",
+                        description: "Transaction created successfully. Ready for wallet signature.",
+                        duration: 3000,
+                      });
+                      
+                      // Display transaction details to console for debugging
+                      logger.log('[Test NFT Mint] Transaction created:', result.transaction);
+                      
+                      // Now open the completion modal to handle the actual minting process
+                      try {
+                        logger.log(`[Test NFT Mint] Opening completion popup to handle minting`);
+                        if (window.showModuleCompletionPopup) {
+                          window.showModuleCompletionPopup({
+                            moduleId: moduleNumber,
+                            moduleName: "Sui Move Basics",
+                            walletAddress: walletAddress,
+                            xpEarned: 250,
+                            suiEarned: 0.75,
+                            quizScore: 85
+                          });
+                        } else {
+                          toast({
+                            title: "Error",
+                            description: "Completion popup function not found",
+                            variant: "destructive",
+                            duration: 3000,
+                          });
+                        }
+                      } catch (error) {
+                        logger.error('[Learning] Error showing NFT mint completion popup:', error);
+                        toast({
+                          title: "Error",
+                          description: "Failed to show completion popup",
+                          variant: "destructive",
+                          duration: 3000,
+                        });
+                      }
+                    } else {
+                      toast({
+                        title: "NFT Transaction Result",
+                        description: result.message || "Transaction was processed",
+                        duration: 3000,
+                      });
+                    }
+                  } else {
+                    toast({
+                      title: "NFT Transaction Failed",
+                      description: result.message || "Unknown error",
+                      variant: "destructive",
+                      duration: 3000,
+                    });
+                  }
+                } catch (err) {
+                  logger.error('[Test NFT Mint] Error:', err);
+                  toast({
+                    title: "Error",
+                    description: "Failed to create NFT mint transaction",
+                    variant: "destructive",
+                    duration: 3000,
+                  });
+                }
+              }}
+            >
+              Test NFT Mint
+            </Button>
           </div>
           <p className="text-xs mt-2 text-yellow-500">These tools are for debugging only</p>
         </div>
@@ -3360,6 +3521,13 @@ const Learning = () => {
           </Button>
         </div>
       )}
+      
+      {/* Graduation Popup */}
+      <GraduationPopup 
+        isOpen={showGraduationPopup}
+        onClose={() => setShowGraduationPopup(false)}
+        username={userData?.displayName || (walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : 'Explorer')}
+      />
     </div>
   );
 };

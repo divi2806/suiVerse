@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import NotFound from "./pages/NotFound";
 import Learning from "./pages/Learning";
@@ -42,6 +42,9 @@ const App = () => {
     walletAddress: string;
     xpEarned: number;
     suiEarned: number;
+    quizScore?: number;
+    correctAnswers?: number;
+    totalQuestions?: number;
   }>({
     isOpen: false,
     moduleId: 0,
@@ -88,6 +91,9 @@ const App = () => {
     walletAddress: string;
     xpEarned: number;
     suiEarned: number;
+    quizScore?: number;
+    correctAnswers?: number;
+    totalQuestions?: number;
   }) => {
     setModuleCompletionData({
       isOpen: true,
@@ -103,6 +109,11 @@ const App = () => {
     }));
   };
 
+  // Handle navigation to learning page
+  const handleReturnToMap = () => {
+    window.location.href = '/learning';
+  };
+
   // Make the showModuleCompletionPopup function available globally
   useEffect(() => {
     
@@ -115,13 +126,22 @@ const App = () => {
 
     // Debug: Add a test function
     const testPopup = () => {
+      // Get the current wallet address from userData instead of using a test address
+      const walletAddress = userData.walletAddress || 'test-wallet';
+      
+      if (walletAddress === 'test-wallet') {
+        console.warn('[NFT] Warning: Using test wallet address. Connect a real wallet for NFT minting.');
+      }
       
       showModuleCompletionPopup({
-        moduleId: 1,
-        moduleName: 'Test Module',
-        walletAddress: 'test-wallet',
+        moduleId: 2, // Use module 2 for testing
+        moduleName: 'Sui Move Basics',
+        walletAddress: walletAddress,
         xpEarned: 200,
-        suiEarned: 0.5
+        suiEarned: 0.5,
+        quizScore: 85,
+        correctAnswers: 17,
+        totalQuestions: 20
       });
     };
     win.testModulePopup = testPopup;
@@ -133,7 +153,7 @@ const App = () => {
       delete win.showModuleCompletionPopup;
       delete win.testModulePopup;
     };
-  }, []);
+  }, [userData.walletAddress]); // Add userData.walletAddress as a dependency
 
   // Add event listener for moduleCompleted custom event
   useEffect(() => {
@@ -229,6 +249,10 @@ const App = () => {
                       walletAddress={moduleCompletionData.walletAddress}
                       xpEarned={moduleCompletionData.xpEarned}
                       suiEarned={moduleCompletionData.suiEarned}
+                      quizScore={moduleCompletionData.quizScore}
+                      correctAnswers={moduleCompletionData.correctAnswers}
+                      totalQuestions={moduleCompletionData.totalQuestions}
+                      onReturnToMap={handleReturnToMap}
                     />
                     
                     {/* Daily Streak Modal - available globally */}

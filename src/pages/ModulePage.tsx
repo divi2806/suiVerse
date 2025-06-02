@@ -32,14 +32,21 @@ import { getFirestore, doc, collection, setDoc, updateDoc, arrayUnion, serverTim
 import DailyStreakModal from '@/components/DailyStreakModal';
 // Import the streakUtils functions explicitly with a different name to avoid conflicts
 import * as streakUtils from '@/utils/streakUtils';
-import ModuleCompletionPopup from '@/components/ModuleCompletionPopup';
 // Add logger import at the top of the file
 import logger from '@/utils/logger';
 
-// Add type declaration for the window object at the top of the file
+// Revert to original interface
 declare global {
   interface Window {
     hasShownStreakModalThisSession?: boolean;
+    showModuleCompletionPopup: (data: {
+      moduleId: number;
+      moduleName: string;
+      walletAddress: string;
+      xpEarned: number;
+      suiEarned: number;
+      quizScore?: number;
+    }) => void;
   }
 }
 
@@ -116,7 +123,6 @@ const ModulePage: React.FC = () => {
   const [flashcardXpPool, setFlashcardXpPool] = useState(0);
   const [showLevelUpModal, setShowLevelUpModal] = useState(false);
   const [levelUpDetails, setLevelUpDetails] = useState({ oldLevel: 0, newLevel: 0 });
-  const [showMissionCompletedModal, setShowMissionCompletedModal] = useState(false);
   const [showDailyStreakModal, setShowDailyStreakModal] = useState(false);
   const [streakDetails, setStreakDetails] = useState({ streak: 0, xpEarned: 0, isMilestone: false });
   const [galaxyName, setGalaxyName] = useState<string>("");
@@ -613,14 +619,14 @@ const ModulePage: React.FC = () => {
           await new Promise(resolve => setTimeout(resolve, 50));
         } else {
           // Fallback to the sequence-based approach
-      if (moduleId === 'intro-to-sui') {
+          if (moduleId === 'intro-to-sui') {
             setNextModuleId('smart-contracts-101');
           } else if (moduleId === 'smart-contracts-101') {
             setNextModuleId('move-language');
-      } else {
-        const currentNum = parseInt(moduleId.replace('module-', ''), 10);
+          } else {
+            const currentNum = parseInt(moduleId.replace('module-', ''), 10);
             setNextModuleId(`module-${currentNum + 1}`);
-      }
+          }
       
           // We need to wait for state update
           await new Promise(resolve => setTimeout(resolve, 50));
@@ -630,7 +636,6 @@ const ModulePage: React.FC = () => {
       // Special handling for module-16 (last module)
       if (moduleId === 'module-16') {
         // This is the last module, show a special celebration
-        setShowMissionCompletedModal(true);
         
         // Refresh user data from firestore to update the navbar
         await refreshUserData();
@@ -661,6 +666,23 @@ const ModulePage: React.FC = () => {
             description: `You've completed your journey and returned to Earth!`,
             duration: 5000,
           });
+          
+          // Parse module ID to get a numeric ID
+          let moduleNumId = 16;
+          
+          // Show the global module completion popup
+          try {
+            window.showModuleCompletionPopup({
+              moduleId: moduleNumId,
+              moduleName: moduleContent?.title || 'Final Module',
+              walletAddress: walletAddress,
+              xpEarned: result.xpEarned,
+              suiEarned: result.suiEarned || 0.5,
+              quizScore: quizScore
+            });
+          } catch (error) {
+            logger.error('[ModulePage] Error showing completion popup:', error);
+          }
         } else {
           toast({
             title: "Sync Error",
@@ -751,43 +773,71 @@ const ModulePage: React.FC = () => {
         // Set the flag to prevent showing it again
         sessionStorage.setItem(missionCompletedKey, 'true');
         
-        // Show the mission completed modal for all modules
-        setShowMissionCompletedModal(true);
+        // Parse module ID to get a numeric ID
+        let moduleNumId = 1;
+        if (moduleId === 'intro-to-sui') {
+          moduleNumId = 1;
+        } else if (moduleId === 'smart-contracts-101') {
+          moduleNumId = 2;
+        } else if (moduleId === 'move-language') {
+          moduleNumId = 3;
+        } else if (moduleId === 'objects-ownership') {
+          moduleNumId = 4;
+        } else {
+          const match = moduleId.match(/\d+/);
+          if (match) {
+            moduleNumId = parseInt(match[0], 10);
+          }
+        }
+        
+        // Show the global module completion popup
+        try {
+          window.showModuleCompletionPopup({
+            moduleId: moduleNumId,
+            moduleName: moduleContent?.title || 'Module',
+            walletAddress: walletAddress,
+            xpEarned: result.xpEarned,
+            suiEarned: result.suiEarned,
+            quizScore: quizScore
+          });
+        } catch (error) {
+          logger.error('[ModulePage] Error showing completion popup:', error);
+        }
       
-      // Check if user leveled up
-      if (result.leveledUp && result.newLevel) {
-        setLevelUpDetails({
-          oldLevel: (result.newLevel - 1),
-          newLevel: result.newLevel
-        });
-        setShowLevelUpModal(true);
-      } else {
-        // If no level up, just show XP toast
+        // Check if user leveled up
+        if (result.leveledUp && result.newLevel) {
+          setLevelUpDetails({
+            oldLevel: (result.newLevel - 1),
+            newLevel: result.newLevel
+          });
+          setShowLevelUpModal(true);
+        } else {
+          // If no level up, just show XP toast
+          toast({
+            title: `Module Completed!`,
+            description: `+${result.xpEarned} XP Earned`,
+            duration: 3000,
+          });
+        }
+      
+        // Show SUI token reward toast
         toast({
-          title: `Module Completed!`,
-          description: `+${result.xpEarned} XP Earned`,
-          duration: 3000,
-        });
-      }
-      
-      // Show SUI token reward toast
-      toast({
-        title: `🪙 SUI Tokens Awarded!`,
-        description: `You've earned ${result.suiEarned} SUI for completing this module.`,
-        duration: 4000,
-        variant: "default",
-        className: "sui-reward-toast",
-      });
-      
-      // Show mystery box notification if awarded
-      if (result.mysteryBoxAwarded) {
-        toast({
-          title: `🎁 Mystery Box Acquired!`,
-          description: `You received a mystery box. Check the Rewards page to open it!`,
-          duration: 5000,
+          title: `🪙 SUI Tokens Awarded!`,
+          description: `You've earned ${result.suiEarned} SUI for completing this module.`,
+          duration: 4000,
           variant: "default",
-          className: "mystery-box-toast",
+          className: "sui-reward-toast",
         });
+      
+        // Show mystery box notification if awarded
+        if (result.mysteryBoxAwarded) {
+          toast({
+            title: `🎁 Mystery Box Acquired!`,
+            description: `You received a mystery box. Check the Rewards page to open it!`,
+            duration: 5000,
+            variant: "default",
+            className: "mystery-box-toast",
+          });
         }
       } else {
         logger.log(`[ModulePage] Mission completed modal already shown for module ${moduleId}, skipping`);
@@ -1483,233 +1533,6 @@ const ModulePage: React.FC = () => {
     );
   };
   
-  // Mission completed modal component for Earth completion
-  const MissionCompletedModal: React.FC = () => {
-    // Use a ref to track if the effect has already run
-    const effectRan = useRef(false);
-    
-    // Initialize completionData directly with computed values instead of setting it in useEffect
-    const displayXp = totalXpEarned > 0 ? totalXpEarned : (flashcardXpPool + 200);
-    const displaySui = 0.5; // Default SUI reward
-    const displayModuleName = moduleContent?.title || 'Module';
-    const displayModuleId = moduleNumber || 1;
-    
-    // Use useCallback to memoize the function and prevent it from being recreated on every render
-    const checkAndUnlockNextGalaxy = useCallback(async () => {
-      if (!walletAddress || !moduleId) return;
-      
-      try {
-        const galaxiesData = await getGalaxiesWithModules(walletAddress);
-        
-        // Find which galaxy this module belongs to
-        const currentGalaxy = galaxiesData.find(g => g.modules.some(m => m.id === moduleId));
-        
-        if (currentGalaxy) {
-          // Check if all modules in this galaxy are completed (including the one we just completed)
-          const allGalaxyModulesCompleted = currentGalaxy.modules.every(m => 
-            m.completed || m.id === moduleId // Include current module as completed
-          );
-          
-          if (allGalaxyModulesCompleted) {
-            logger.log(`[ModulePage] All modules in galaxy ${currentGalaxy.id} completed, force unlocking next galaxy`);
-            
-            // Find the next galaxy
-            const nextGalaxyIndex = galaxiesData.findIndex(g => g.id === currentGalaxy.id) + 1;
-            if (nextGalaxyIndex < galaxiesData.length) {
-              const nextGalaxy = galaxiesData[nextGalaxyIndex];
-              
-              // Check if next galaxy is already unlocked to prevent duplicate unlocks
-              const isNextGalaxyAlreadyUnlocked = nextGalaxy.unlocked === true;
-              
-              if (!isNextGalaxyAlreadyUnlocked) {
-                // Find the first module in the next galaxy
-                const firstModule = nextGalaxy.modules.length > 0 ? nextGalaxy.modules[0] : null;
-                if (!firstModule) {
-                  logger.warn(`[ModulePage] No modules found in galaxy ${nextGalaxy.id}`);
-                  return;
-                }
-                
-                // Calculate the new rocket position
-                const newRocketPosition = {
-                  x: nextGalaxy.position.x + firstModule.position.x,
-                  y: nextGalaxy.position.y + firstModule.position.y
-                };
-                
-                // Force unlock next galaxy in Firestore
-                const db = getFirestore();
-                const userProgressRef = doc(db, 'learningProgress', walletAddress);
-                
-                await updateDoc(userProgressRef, {
-                  unlockedGalaxies: arrayUnion(nextGalaxy.id),
-                  currentGalaxyId: nextGalaxy.id,
-                  currentModuleId: firstModule.id,
-                  rocketPosition: newRocketPosition,
-                  lastActivityTimestamp: serverTimestamp()
-                });
-                
-                // Set a session flag to prevent duplicate notifications
-                const galaxyUnlockKey = `galaxy_${currentGalaxy.id}_unlocked_${nextGalaxy.id}`;
-                if (!sessionStorage.getItem(galaxyUnlockKey)) {
-                  sessionStorage.setItem(galaxyUnlockKey, 'true');
-                  
-                  // Create and dispatch a galaxy unlocked event
-                  const galaxyUnlockedEvent = new CustomEvent('galaxyUnlocked', {
-                    detail: { 
-                      galaxyId: currentGalaxy.id,
-                      nextGalaxyId: nextGalaxy.id,
-                      firstModuleId: firstModule.id,
-                      rocketPosition: newRocketPosition
-                    }
-                  });
-                  document.dispatchEvent(galaxyUnlockedEvent);
-                  
-                  toast({
-                    title: `🌌 ${nextGalaxy.name} Galaxy Unlocked!`,
-                    description: `You've unlocked the ${nextGalaxy.name} Galaxy and can now access its modules!`,
-                    duration: 5000,
-                    variant: "default",
-                    className: "galaxy-unlocked-toast",
-                  });
-                }
-              } else {
-                logger.log(`[ModulePage] Next galaxy ${nextGalaxy.id} already unlocked, skipping unlock process`);
-              }
-            }
-          }
-        }
-      } catch (error) {
-        logger.error('[ModulePage] Error in force unlock:', error);
-      }
-    }, [walletAddress, moduleId, toast]);
-    
-    // Fixed useEffect to run only once
-    useEffect(() => {
-      // Skip if the effect has already run or if required data is missing
-      if (effectRan.current || !walletAddress || !moduleId) return;
-      
-      // Update completion data in the parent component to make it available for other uses
-      setCompletionData({
-        moduleId: displayModuleId,
-        moduleName: displayModuleName,
-        xpEarned: displayXp,
-        suiEarned: displaySui,
-        quizScore: quizScore
-      });
-      
-      // Run the galaxy unlock check
-      checkAndUnlockNextGalaxy();
-      
-      // Mark that this effect has run
-      effectRan.current = true;
-      
-      // Cleanup function
-      return () => {
-        // Reset the ref when component unmounts
-        effectRan.current = false;
-      };
-    }, [walletAddress, moduleId, checkAndUnlockNextGalaxy, displayModuleId, displayModuleName, displayXp, displaySui, quizScore]);
-    
-    // Close the modal and navigate to next module
-    const handleContinue = async () => {
-      setShowMissionCompletedModal(false);
-      
-      // Find the next module ID
-      let nextModuleId = '';
-      if (moduleId === 'intro-to-sui') {
-        nextModuleId = 'smart-contracts-101';
-      } else if (moduleId === 'smart-contracts-101') {
-        nextModuleId = 'move-language';
-      } else if (moduleId === 'move-language') {
-        nextModuleId = 'objects-ownership';
-      } else if (moduleId === 'objects-ownership') {
-        nextModuleId = 'advanced-concepts';
-      } else if (moduleId === 'advanced-concepts') {
-        nextModuleId = 'nft-marketplace';
-      } else {
-        // Get current module ID and increment it
-        try {
-          // Try to parse an ID like module-2
-          const matches = moduleId?.match(/^([a-z-]+)-(\d+)$/);
-          if (matches && matches.length === 3) {
-            const prefix = matches[1];
-            const num = parseInt(matches[2], 10);
-            nextModuleId = `${prefix}-${num + 1}`;
-          } else {
-            // Default to returning to galaxy map if we can't determine next module
-            navigate('/learning');
-            return;
-          }
-        } catch (error) {
-          logger.error('[ModulePage] Error determining next module:', error);
-          // Default to returning to galaxy map on error
-          navigate('/learning');
-          return;
-        }
-      }
-      
-      // If we found a next module, navigate to it
-      if (nextModuleId) {
-        logger.log(`[ModulePage] Navigating to next module: ${nextModuleId}`);
-        navigate(`/learning/${nextModuleId}`);
-      } else {
-        // Fallback to galaxy map
-        navigate('/learning');
-      }
-    };
-    
-    // Format XP numbers with commas
-    const formatNumber = (num: number) => {
-      return num.toString().replace(/\B(?=(\d{3})+(?!d))/g, ",");
-    };
-    
-    if (!showMissionCompletedModal) return null;
-    
-    return (
-      <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.3 }}
-          className="bg-card/95 backdrop-blur-md rounded-lg p-6 max-w-md w-full shadow-xl border border-primary/20"
-        >
-            <div className="text-center">
-            <div className="mx-auto bg-primary/20 rounded-full w-16 h-16 flex items-center justify-center mb-4">
-              <CheckCircle className="h-8 w-8 text-primary" />
-            </div>
-            
-            <h2 className="text-2xl font-bold mb-2">Mission Completed!</h2>
-            <p className="text-foreground/80 mb-6">You've successfully completed {displayModuleName} and earned rewards.</p>
-                
-            <div className="bg-background/50 rounded-lg p-4 mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-foreground/70">XP Earned</span>
-                <span className="font-semibold text-primary">{formatNumber(displayXp)} XP</span>
-                  </div>
-              
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-foreground/70">SUI Tokens</span>
-                <span className="font-semibold text-primary">{displaySui} SUI</span>
-          </div>
-          
-              <div className="flex justify-between items-center">
-                <span className="text-foreground/70">Module NFT</span>
-                <span className="font-semibold text-primary">Claimed</span>
-            </div>
-            </div>
-          
-          <Button 
-              className="w-full" 
-              onClick={handleContinue}
-              size="lg"
-          >
-              Continue to Next Module
-          </Button>
-          </div>
-        </motion.div>
-      </div>
-    );
-  };
-  
   // Loading state
   if (loading) {
     return (
@@ -1836,7 +1659,6 @@ const ModulePage: React.FC = () => {
       {/* Modals */}
       <AnimatePresence>
         {showLevelUpModal && <LevelUpModal />}
-        {showMissionCompletedModal && <MissionCompletedModal />}
         {showDailyStreakModal && <DailyStreakModal />}
       </AnimatePresence>
       
@@ -1867,7 +1689,7 @@ const ModulePage: React.FC = () => {
               className="text-xs"
               onClick={() => {
                 // Show module completion popup directly
-                if (moduleId) {
+                if (moduleId && window.showModuleCompletionPopup) {
                   // Parse module ID to get a numeric ID
                   let moduleNumId = 1;
                   if (moduleId === 'intro-to-sui') {
@@ -1878,33 +1700,60 @@ const ModulePage: React.FC = () => {
                     moduleNumId = 3;
                   } else if (moduleId === 'objects-ownership') {
                     moduleNumId = 4;
-                } else {
+                  } else {
                     const match = moduleId.match(/\d+/);
                     if (match) {
                       moduleNumId = parseInt(match[0], 10);
-                }
+                    }
+                  }
+                  
+                  // Check if wallet is connected
+                  if (!walletAddress) {
+                    toast({
+                      title: "Wallet Not Connected",
+                      description: "Please connect your wallet to mint NFTs",
+                      variant: "destructive",
+                      duration: 3000,
+                    });
+                    return;
                   }
                   
                   // Use actual accumulated XP and quiz score if available
                   const actualXpEarned = totalXpEarned > 0 ? totalXpEarned : (flashcardXpPool + 200);
                   const actualQuizScore = quizScore > 0 ? quizScore : 90;
                   
-                  setCompletionData({
-                    moduleId: moduleNumId,
-                    moduleName: moduleContent?.title || 'Test Module',
-                    xpEarned: actualXpEarned,
-                    suiEarned: 0.75,
-                    quizScore: actualQuizScore
-                  });
-                  
-                  // Open the popup
-                  setShowMissionCompletedModal(true);
-                  
-                  toast({
-                    title: "Test Popup Triggered",
-                    description: "Opening module completion popup with NFT minting",
-                    duration: 3000,
-                  });
+                  // Use the global popup
+                  try {
+                    logger.log(`[ModulePage] Opening completion popup for module ${moduleNumId} with wallet ${walletAddress}`);
+                    
+                    // Use a simple object without extra properties to avoid type issues
+                    const popupData = {
+                      moduleId: moduleNumId,
+                      moduleName: moduleContent?.title || 'Test Module',
+                      walletAddress: walletAddress,
+                      xpEarned: actualXpEarned,
+                      suiEarned: 0.75,
+                      quizScore: actualQuizScore
+                    };
+                    
+                    // Call the popup function
+                    window.showModuleCompletionPopup(popupData);
+                    
+                    // Show success toast
+                    toast({
+                      title: "Test Popup Triggered",
+                      description: "Opening module completion popup with NFT minting",
+                      duration: 3000,
+                    });
+                  } catch (error) {
+                    logger.error('[ModulePage] Error showing test completion popup:', error);
+                    toast({
+                      title: "Error",
+                      description: "Failed to show completion popup",
+                      variant: "destructive",
+                      duration: 3000,
+                    });
+                  }
                 }
               }}
             >
@@ -1917,10 +1766,20 @@ const ModulePage: React.FC = () => {
               className="text-xs bg-green-500/10"
               onClick={async () => {
                 try {
-                  if (!walletAddress || !moduleId) {
+                  if (!walletAddress) {
+                    toast({
+                      title: "Wallet Not Connected",
+                      description: "Please connect your wallet to mint NFTs",
+                      variant: "destructive",
+                      duration: 3000,
+                    });
+                    return;
+                  }
+                  
+                  if (!moduleId) {
                     toast({
                       title: "Error",
-                      description: "Wallet or module ID missing",
+                      description: "Module ID not found",
                       variant: "destructive",
                       duration: 3000,
                     });
@@ -1950,6 +1809,8 @@ const ModulePage: React.FC = () => {
                     duration: 3000,
                   });
                   
+                  logger.log(`[Test NFT Mint] Creating transaction for module ${moduleNumber}, wallet ${walletAddress}`);
+                  
                   // Import the NFT service functions
                   const { mintModuleCompletionNFT } = await import('@/services/nftService');
                   
@@ -1958,11 +1819,11 @@ const ModulePage: React.FC = () => {
                   
                   if (result.success) {
                     if (result.transaction) {
-                  toast({
+                      toast({
                         title: "NFT Transaction Created",
                         description: "Transaction created successfully. Ready for wallet signature.",
-                    duration: 3000,
-                  });
+                        duration: 3000,
+                      });
                       
                       // Display transaction details to console for debugging
                       logger.log('[Test NFT Mint] Transaction created:', result.transaction);
@@ -1971,15 +1832,26 @@ const ModulePage: React.FC = () => {
                       const actualXpEarned = totalXpEarned > 0 ? totalXpEarned : (flashcardXpPool + 200);
                       const actualQuizScore = quizScore > 0 ? quizScore : 90;
                       
-                      setCompletionData({
-                        moduleId: moduleNumber,
-                        moduleName: moduleContent?.title || 'Test Module',
-                        xpEarned: actualXpEarned,
-                        suiEarned: 0.75,
-                        quizScore: actualQuizScore
-                      });
-                      
-                      setShowMissionCompletedModal(true);
+                      // Use the global popup
+                      try {
+                        logger.log(`[Test NFT Mint] Opening completion popup to handle minting`);
+                        window.showModuleCompletionPopup({
+                          moduleId: moduleNumber,
+                          moduleName: moduleContent?.title || 'Test Module',
+                          walletAddress: walletAddress,
+                          xpEarned: actualXpEarned,
+                          suiEarned: 0.75,
+                          quizScore: actualQuizScore
+                        });
+                      } catch (error) {
+                        logger.error('[ModulePage] Error showing NFT mint completion popup:', error);
+                        toast({
+                          title: "Error",
+                          description: "Failed to show completion popup",
+                          variant: "destructive",
+                          duration: 3000,
+                        });
+                      }
                     } else {
                       toast({
                         title: "NFT Transaction Result",

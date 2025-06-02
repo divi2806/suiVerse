@@ -91,10 +91,44 @@ const UserProfileDropdown = memo(({
   handleConnect: (address: string) => void,
   handleDisconnect: () => void
 }) => {
+  // Use a stable reference for menu content to prevent infinite rerender loops
+  const [open, setOpen] = useState(false);
   
+  // Memoize menu content to prevent needless rerenders
+  const menuContent = useMemo(() => (
+    <DropdownMenuContent align="end" className="galaxy-card mt-2">
+      <div className="flex flex-col items-center p-4 space-y-2 border-b border-border">
+        <Avatar className="h-16 w-16 border-2 border-primary mb-2">
+          <AvatarImage src={avatarSrc} alt={username} />
+          <AvatarFallback className="bg-muted text-primary">
+            {username.charAt(0)}
+          </AvatarFallback>
+        </Avatar>
+        <p className="font-medium">{username}</p>
+        <div className="bg-muted rounded-full px-3 py-0.5 text-xs">
+          Level {userLevel} Explorer
+        </div>
+      </div>
+      <DropdownMenuItem asChild>
+        <Link to="/profile" className="w-full">Profile</Link>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild>
+        <Link to="/inventory" className="w-full">Inventory</Link>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild>
+        <Link to="/settings" className="w-full">Settings</Link>
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => {
+        handleDisconnect();
+        setOpen(false);
+      }}>
+        <span className="w-full text-left text-destructive">Disconnect</span>
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  ), [avatarSrc, username, userLevel, handleDisconnect]);
   
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-8 w-8 rounded-full">
           <Avatar className="h-8 w-8 border border-primary/30">
@@ -105,39 +139,7 @@ const UserProfileDropdown = memo(({
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="galaxy-card mt-2">
-        <div className="flex flex-col items-center p-4 space-y-2 border-b border-border">
-          <Avatar className="h-16 w-16 border-2 border-primary mb-2">
-            <AvatarImage src={avatarSrc} alt={username} />
-            <AvatarFallback className="bg-muted text-primary">
-              {username.charAt(0)}
-            </AvatarFallback>
-          </Avatar>
-          <p className="font-medium">{username}</p>
-          <div className="bg-muted rounded-full px-3 py-0.5 text-xs">
-            Level {userLevel} Explorer
-          </div>
-        </div>
-        <DropdownMenuItem>
-          <Link to="/profile" className="w-full">Profile</Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem>
-          <Link to="/inventory" className="w-full">Inventory</Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem>
-          <Link to="/settings" className="w-full">Settings</Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem>
-          <WalletConnect
-            onConnect={handleConnect}
-            onDisconnect={handleDisconnect}
-            connected={true}
-            className="w-full text-left text-destructive"
-          >
-            Disconnect
-          </WalletConnect>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
+      {menuContent}
     </DropdownMenu>
   );
 });
@@ -178,25 +180,150 @@ const NavBar = memo<NavBarProps>(({
   // Get user data from context or props with proper logging
   const userStats = useMemo(() => {
     // Always prioritize userData.photoURL from context
-    const finalAvatarSrc = userData?.photoURL || 'https://api.dicebear.com/7.x/bottts/svg?seed=fixed';
+    const finalAvatarSrc = userData?.photoURL || avatarSrc || 'https://api.dicebear.com/7.x/bottts/svg?seed=fixed';
     
     // Get user XP and calculate level
     const userXpValue = userData?.xp || userXp || 0;
     const calculatedLevel = calculateLevel(userXpValue);
     
-    const stats = {
+    return {
       xp: userXpValue,
       streak: userData?.streak || userStreak || 0,
       level: calculatedLevel, // Use calculated level instead of stored level
       username: userData?.displayName || username || 'Explorer',
       avatarSrc: finalAvatarSrc
     };
+  }, [userData, userXp, userStreak, username, avatarSrc]);
+
+  // Memoize the connect wallet button to prevent rerenders
+  const connectWalletButton = useMemo(() => (
+    <WalletConnect 
+      onConnect={handleConnect} 
+      onDisconnect={handleDisconnect} 
+      connected={false}
+      className="neon-button"
+    >
+      Connect Wallet
+    </WalletConnect>
+  ), [handleConnect, handleDisconnect]);
+
+  // Memoize the mobile menu to prevent rerenders
+  const mobileMenu = useMemo(() => {
+    if (!mobileMenuOpen) return null;
     
-    
-    
-    
-    return stats;
-  }, [userData, userXp, userStreak, userLevel, username, avatarSrc]);
+    return (
+      <div className="md:hidden fixed inset-0 z-50 bg-background/95 backdrop-blur-sm">
+        <div className="flex flex-col h-full">
+          <div className="flex items-center justify-between p-4 border-b border-border">
+            <Link to="/" className="flex items-center" onClick={() => setMobileMenuOpen(false)}>
+              <Rocket className="h-6 w-6 text-primary mr-2" />
+              <span className="font-heading text-lg font-bold">SuiVerse</span>
+            </Link>
+            <button 
+              onClick={() => setMobileMenuOpen(false)}
+              className="p-2 rounded-full hover:bg-muted"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="space-y-2">
+              <NavLink 
+                to="/" 
+                icon={<HomeIcon className="h-5 w-5 mr-3" />}
+                exact
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Home
+              </NavLink>
+              <NavLink 
+                to="/learning" 
+                icon={<BookIcon className="h-5 w-5 mr-3" />}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Learn
+              </NavLink>
+              <NavLink 
+                to="/games" 
+                icon={<GamepadIcon className="h-5 w-5 mr-3" />}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Games
+              </NavLink>
+              <NavLink 
+                to="/rewards" 
+                icon={<PackageIcon className="h-5 w-5 mr-3" />}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Rewards
+              </NavLink>
+              <NavLink 
+                to="/inventory" 
+                icon={<LayoutDashboardIcon className="h-5 w-5 mr-3" />}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Inventory
+              </NavLink>
+              <NavLink 
+                to="/leaderboard" 
+                icon={<TrophyIcon className="h-5 w-5 mr-3" />}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Leaderboard
+              </NavLink>
+              <NavLink 
+                to="/blazo" 
+                icon={<BotIcon className="h-5 w-5 mr-3" />}
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Blazo AI
+              </NavLink>
+            </div>
+            
+            <div className="mt-8 p-4 border-t border-border">
+              {connected ? (
+                <div className="flex flex-col space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Avatar className="h-10 w-10 border border-primary/30">
+                        <AvatarImage src={userStats.avatarSrc} alt={userStats.username} />
+                        <AvatarFallback>{userStats.username.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium">{userStats.username}</p>
+                        <p className="text-xs text-muted-foreground">Level {userStats.level}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-card p-2 rounded-md text-center">
+                      <p className="text-xs text-muted-foreground">Streak</p>
+                      <p className="font-medium">{userStats.streak} Days</p>
+                    </div>
+                    <div className="bg-card p-2 rounded-md text-center">
+                      <p className="text-xs text-muted-foreground">XP</p>
+                      <p className="font-medium">{userStats.xp}</p>
+                    </div>
+                  </div>
+                  <Button variant="destructive" size="sm" onClick={handleDisconnect}>
+                    Disconnect Wallet
+                  </Button>
+                </div>
+              ) : (
+                <Button 
+                  onClick={() => setMobileMenuOpen(false)} 
+                  className="w-full"
+                >
+                  Connect Wallet
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }, [mobileMenuOpen, connected, userStats, handleDisconnect]);
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-background/70 border-b border-border/40">
@@ -257,14 +384,7 @@ const NavBar = memo<NavBarProps>(({
               />
             </>
           ) : (
-            <WalletConnect 
-              onConnect={handleConnect} 
-              onDisconnect={handleDisconnect} 
-              connected={false}
-              className="neon-button"
-            >
-              Connect Wallet
-            </WalletConnect>
+            connectWalletButton
           )}
         </div>
 
@@ -282,79 +402,7 @@ const NavBar = memo<NavBarProps>(({
       </nav>
 
       {/* Mobile Navigation */}
-      {mobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-50 bg-background/95 backdrop-blur-sm">
-          <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <Link to="/" className="flex items-center" onClick={() => setMobileMenuOpen(false)}>
-                <Rocket className="h-6 w-6 text-primary mr-2" />
-                <span className="font-heading text-lg font-bold">SuiVerse</span>
-              </Link>
-              <button 
-                onClick={() => setMobileMenuOpen(false)}
-                className="p-2 rounded-full hover:bg-muted"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="space-y-2">
-                <NavLink 
-                  to="/" 
-                  icon={<HomeIcon className="h-5 w-5 mr-3" />}
-                  exact
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Home
-                </NavLink>
-                <NavLink 
-                  to="/learning" 
-                  icon={<BookIcon className="h-5 w-5 mr-3" />}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Learn
-                </NavLink>
-                <NavLink 
-                  to="/games" 
-                  icon={<GamepadIcon className="h-5 w-5 mr-3" />}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Games
-                </NavLink>
-                <NavLink 
-                  to="/rewards" 
-                  icon={<PackageIcon className="h-5 w-5 mr-3" />}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Rewards
-                </NavLink>
-                <NavLink 
-                  to="/inventory" 
-                  icon={<LayoutDashboardIcon className="h-5 w-5 mr-3" />}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Inventory
-                </NavLink>
-                <NavLink 
-                  to="/leaderboard" 
-                  icon={<TrophyIcon className="h-5 w-5 mr-3" />}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Leaderboard
-                </NavLink>
-                <NavLink 
-                  to="/blazo" 
-                  icon={<BotIcon className="h-5 w-5 mr-3" />}
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  Blazo AI
-                </NavLink>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {mobileMenu}
     </header>
   );
 });

@@ -5,5 +5,6 @@ interface Window {
     walletAddress: string;
     xpEarned: number;
     suiEarned: number;
+    quizScore?: number;
   }) => void;
 } 
