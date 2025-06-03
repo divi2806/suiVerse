@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from '@/contexts/AuthContext';
 import { calculateLevel } from '@/services/learningService';
+import { useDisconnectWallet } from '@mysten/dapp-kit';
+import { toast } from "@/components/ui/use-toast";
 
 interface NavBarProps {
   connected: boolean;
@@ -158,6 +160,7 @@ const NavBar = memo<NavBarProps>(({
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { userData } = useAuth();
+  const disconnectMutation = useDisconnectWallet();
 
   // Track the last connected address to avoid duplicate onConnect calls
   const lastConnectedAddressRef = useRef<string | null>(null);
@@ -171,11 +174,30 @@ const NavBar = memo<NavBarProps>(({
     }
   }, [onConnect]);
 
-  const handleDisconnect = useCallback(() => {
-    lastConnectedAddressRef.current = null;
-    onDisconnect();
-    setMobileMenuOpen(false);
-  }, [onDisconnect]);
+  const handleDisconnect = useCallback(async () => {
+    try {
+      // Clear the reference
+      lastConnectedAddressRef.current = null;
+      
+      // Call the disconnect mutation directly
+      await disconnectMutation.mutateAsync();
+      
+      // Call the onDisconnect callback
+      onDisconnect();
+      
+      // Close mobile menu if open
+      setMobileMenuOpen(false);
+    } catch (error) {
+      console.error("Error disconnecting wallet:", error);
+      // Show error toast
+      toast({
+        title: "Disconnection Failed",
+        description: "There was a problem disconnecting your wallet.",
+        variant: "destructive",
+        duration: 3000,
+      });
+    }
+  }, [onDisconnect, disconnectMutation]);
 
   // Get user data from context or props with proper logging
   const userStats = useMemo(() => {

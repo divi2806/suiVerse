@@ -140,7 +140,30 @@ const Settings = () => {
     setWalletAddress(null);
   };
 
-  const handleDisconnect = handleWalletDisconnect(disconnectMutation, disconnect);
+  const handleDisconnect = async () => {
+    try {
+      // Call the disconnect mutation directly
+      await disconnectMutation.mutateAsync();
+      
+      // Notify user of successful disconnection
+      toast({
+        title: "Wallet Disconnected",
+        description: "Your wallet has been disconnected. Connect again to continue tracking progress.",
+        duration: 3000,
+      });
+      
+      // Call the disconnect callback to update local state
+      disconnect();
+    } catch (error) {
+      console.error("Error disconnecting wallet:", error);
+      toast({
+        title: "Disconnection Failed",
+        description: "There was a problem disconnecting your wallet.",
+        variant: "destructive",
+        duration: 3000,
+      });
+    }
+  };
 
   // Handle settings save
   const handleSaveSettings = async () => {

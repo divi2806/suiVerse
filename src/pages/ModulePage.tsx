@@ -20,9 +20,9 @@ import {
   checkDailyStreak,
   restoreStreak,
   ensureLearningProgressInitialized,
-  isModuleCompleted,
-  XP_REWARDS
+  isModuleCompleted
 } from '@/services/learningService';
+import { XP_REWARDS } from '@/constants/xpRewards';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, Rocket, Star, Trophy, Award, CircleCheck, CheckCircle } from 'lucide-react';
 import { useCurrentAccount, useDisconnectWallet } from '@mysten/dapp-kit';
@@ -1417,7 +1417,7 @@ const ModulePage: React.FC = () => {
                 
                 <div className="mt-6 text-center">
                   <Button onClick={handleCompleteModule} className="w-full">
-                      Continue to Next Module
+                      Click to Claim Rewards
                     </Button>
                   <p className="mt-2 text-xs text-muted-foreground">
                     Your progress has been saved

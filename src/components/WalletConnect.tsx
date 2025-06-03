@@ -1,6 +1,7 @@
 import { ConnectButton, useCurrentAccount, useDisconnectWallet } from '@mysten/dapp-kit';
 import { useEffect, useRef, useState } from 'react';
 import { handleWalletDisconnect } from '@/utils/walletHelpers';
+import { toast } from '@/components/ui/use-toast';
 
 interface WalletConnectProps {
   onConnect: (address: string) => void;
@@ -37,9 +38,32 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
   }, [currentAccount, connected, onConnect]);
 
   // Use the utility function for disconnecting
-  const handleDisconnect = () => {
-    walletAddressRef.current = null;
-    handleWalletDisconnect(disconnectMutation, onDisconnect)();
+  const handleDisconnect = async () => {
+    try {
+      // Clear the wallet address reference first
+      walletAddressRef.current = null;
+      
+      // Call the disconnect mutation directly
+      await disconnectMutation.mutateAsync();
+      
+      // Notify user of successful disconnection
+      toast({
+        title: "Wallet Disconnected",
+        description: "Your wallet has been disconnected. Connect again to continue tracking progress.",
+        duration: 3000,
+      });
+      
+      // Call the onDisconnect callback to update parent components
+      onDisconnect();
+    } catch (error) {
+      console.error("Error disconnecting wallet:", error);
+      toast({
+        title: "Disconnection Failed",
+        description: "There was a problem disconnecting your wallet.",
+        variant: "destructive",
+        duration: 3000,
+      });
+    }
   };
 
   return connected ? (

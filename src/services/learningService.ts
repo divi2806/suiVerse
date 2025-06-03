@@ -17,6 +17,8 @@ import {
 import { db } from '@/lib/firebase-config';
 import { getModule } from './geminiService';
 import logger from '@/utils/logger';
+import { XP_REWARDS } from '@/constants/xpRewards';
+import { rewardUser } from './userRewardsService';
 
 interface ModuleProgress {
   moduleId: string;
@@ -64,19 +66,8 @@ interface Galaxy {
   position: { x: number; y: number };
 }
 
-// Constants for rewards
-export const XP_REWARDS = {
-  COMPLETE_FLASHCARD: 10,
-  COMPLETE_QUIZ: 50,
-  CORRECT_QUIZ_ANSWER: 15,
-  DEFEAT_ALIEN: 75,
-  COMPLETE_MODULE: 200,
-  COMPLETE_GALAXY: 500,
-  DAILY_STREAK: 25,
-  STREAK_MILESTONE: 100 // For every 7 days
-};
-
-const SUI_REWARDS = {
+// Constants for SUI rewards
+export const SUI_REWARDS = {
   COMPLETE_MODULE: [0.5, 0.75, 1], // Random amount between 0.5 and 1 SUI
   COMPLETE_GALAXY: 2,
   RESTORE_STREAK: 0.1
@@ -488,8 +479,30 @@ export const completeModule = async (
         level: newLevel,
       suiTokens: increment(suiReward),
       totalSuiEarned: increment(suiReward),
-            lastUpdated: serverTimestamp()
-          });
+        lastUpdated: serverTimestamp()
+    });
+    
+    // Send actual SUI tokens to the user's wallet
+    try {
+      logger.log(`[LearningService] Sending ${suiReward} SUI tokens to ${walletAddress} for completing module ${moduleId}`);
+      
+      // Use the rewardUser function to transfer SUI tokens
+      const rewardResult = await rewardUser(
+        walletAddress,
+        suiReward,
+        `Module ${moduleId} Completion Reward`,
+        'learning'
+      );
+      
+      if (!rewardResult.success) {
+        logger.error(`[LearningService] Failed to send SUI tokens to ${walletAddress}: ${rewardResult.message}`);
+      } else {
+        logger.log(`[LearningService] Successfully sent ${suiReward} SUI tokens to ${walletAddress}, txDigest: ${rewardResult.txDigest}`);
+      }
+    } catch (rewardError) {
+      logger.error(`[LearningService] Error sending SUI tokens: ${rewardError}`);
+      // Don't throw the error, as we still want to complete the module
+    }
           
     // Explicitly update the next module's lock status
     await updateNextModuleLockStatus(walletAddress, moduleId);
